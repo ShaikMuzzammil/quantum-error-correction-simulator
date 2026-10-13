@@ -3,19 +3,24 @@
 /**
  * Quantum Lab 3D — the "beyond flat" live simulation suite.
  *
- * Three fully-interactive real-time visualizers (all driven by the same
- * verified QEC engine, 60 fps, orbit/zoom camera):
+ * Four fully-interactive real-time visualizers (all driven by the same
+ * verified QEC engine, 60 fps, orbit/zoom camera) — every one strictly
+ * about this project's two codes and three noise channels:
  *
- *   1. Bloch Flight 4D  — a logical qubit flying on the Bloch sphere under
- *      continuous noise rounds, with its full time-colored trajectory trail
- *      (3 spatial dimensions + time as the 4th, encoded as color) and the
- *      bare-qubit ghost trajectory for comparison.
+ *   1. Bloch Flight 4D    — a logical qubit flying on the Bloch sphere
+ *      under continuous noise rounds, with its full time-colored
+ *      trajectory trail (3 spatial dimensions + time as the 4th, encoded
+ *      as color) and the bare-qubit ghost trajectory for comparison.
  *
- *   2. State Cityscape  — live 3-D amplitude landscape of an encoded block
- *      (see Lab3DVisuals).
+ *   2. State Cityscape 3D — live 3-D amplitude landscape of an encoded
+ *      block (see Lab3DVisuals).
  *
- *   3. Spacetime Lattice — 4-D surface-code error propagation across
- *      syndrome rounds (see Lab3DVisuals).
+ *   3. Syndrome Spacetime 4D — the 3-Qubit Bit-Flip code's data wires and
+ *      syndrome checks stacked over correction rounds (see Lab3DVisuals).
+ *
+ *   4. Bloch Sphere 3D    — interactive walkthrough of the pipeline on the
+ *      logical qubit: input → encode → noise → syndrome → correct →
+ *      decode, stage by stage (see Lab3DVisuals).
  *
  * Every visualizer exports a formal report (printable HTML → PDF), JSON
  * and per-round data.
@@ -28,25 +33,20 @@ import { Slider } from '@/components/ui/slider';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
-import { Play, RotateCcw, FileText, Braces, MousePointer2, Orbit, Boxes, Network, LandPlot, FlaskConical } from 'lucide-react';
+import { Play, RotateCcw, FileText, Braces, MousePointer2, Orbit, Boxes, Network, FlaskConical, Globe } from 'lucide-react';
 import { makeRng, StateVector } from '@/lib/qec/engine';
 import { getSVCode, SV_CODES } from '@/lib/qec/codes';
 import { NoiseModelId, noiseParams } from '@/lib/qec/noise';
 import { prepareEncodedState, runLiveRound, runBareRound } from '@/lib/qec/pipeline';
 import { Cam, Vec3, useOrbitCam, proj, fitCanvas, drawWireSphere, drawArrow3D, dot3D, label3D, stroke3D } from './three-d';
-import { StateCityscape, SpacetimeLab, ThresholdTerrain } from './Lab3DVisuals';
+import { StateCityscape, SyndromeSpacetime, BlochSphere3D } from './Lab3DVisuals';
 import { downloadJSON, downloadCSV, openPrintableReport, runId, nowStamp, TEAM_NAMES } from '@/lib/report';
 import { GuideField, GuideInfo } from './Guide';
 
 const NOISE_LABELS: Record<string, string> = {
-  bitflip: 'Bit-Flip (X)',
-  phaseflip: 'Phase-Flip (Z)',
-  depolarizing: 'Depolarizing',
-  'amplitude-damping': 'Amplitude Damping',
-  'phase-damping': 'Phase Damping',
-  'thermal-relaxation': 'Thermal Relaxation',
-  'coherent-rotation': 'Coherent Rotation',
-  crosstalk: 'Crosstalk',
+  bitflip: 'Bit-Flip Noise (X)',
+  phaseflip: 'Phase-Flip Noise (Z)',
+  depolarizing: 'Depolarizing Noise',
 };
 
 const STATE_PRESETS = [
@@ -60,7 +60,7 @@ const STATE_PRESETS = [
 function StatChip({ label, value, tone }: { label: string; value: string; tone?: 'good' | 'bad' | 'neutral' }) {
   const color = tone === 'good' ? 'text-emerald-400' : tone === 'bad' ? 'text-rose-400' : 'text-slate-200';
   return (
-    <div className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2">
+    <div className="rounded-lg border border-violet-500/15 bg-[#181430] px-3 py-2">
       <div className="text-[10px] uppercase tracking-wide text-slate-500">{label}</div>
       <div className={`font-mono text-base font-semibold ${color}`}>{value}</div>
     </div>
@@ -83,15 +83,11 @@ interface FlightRound {
 const MAX_TRAIL = 260;
 
 export function BlochFlight() {
-  const [orbit, setOrbit] = useState(true);
   const [codeId, setCodeId] = useState('code-3bitflip');
   const [noise, setNoise] = useState<NoiseModelId>('bitflip');
   const [p, setP] = useState(0.1);
   const [rounds, setRounds] = useState(30);
   const [phase, setPhase] = useState<'idle' | 'playing' | 'done'>('idle');
-  const [rotDeg, setRotDeg] = useState(10);
-  const [t1, setT1] = useState(5);
-  const [t2, setT2] = useState(5);
   const [theta, setTheta] = useState(Math.PI / 3);
   const [phi, setPhi] = useState(Math.PI / 5);
   const [preset, setPreset] = useState('|+i⟩ custom');
@@ -104,10 +100,7 @@ export function BlochFlight() {
   const rafRef = useRef(0);
   const wakeRef = useRef<() => void>(() => {});
   const phaseRef = useRef<'idle' | 'playing' | 'done'>('idle');
-  const { cam, canvasRef, setAuto, onPointerDown, onPointerMove, onPointerUp, onPointerLeave } = useOrbitCam(
-    { dist: 3.0, yaw: 0.55, pitch: 0.42, auto: true },
-    () => wakeRef.current()
-  );
+  const { cam, canvasRef, onPointerDown, onPointerMove, onPointerUp, onPointerLeave } = useOrbitCam({ dist: 3.0 }, () => wakeRef.current());
 
   const svRef = useRef<ReturnType<typeof prepareEncodedState> | null>(null);
   const bareRef = useRef<ReturnType<typeof prepareEncodedState> | null>(null);
@@ -125,23 +118,10 @@ export function BlochFlight() {
   const historyRef = useRef<FlightRound[]>([]);
   const accRef = useRef(0);
   const lastRef = useRef(0);
-  const cfgRef = useRef({ codeId, noise, p, rounds, theta, phi, qecOn, rotDeg, t1, t2 });
+  const cfgRef = useRef({ codeId, noise, p, rounds, theta, phi, qecOn });
   useEffect(() => {
-    cfgRef.current = { codeId, noise, p, rounds, theta, phi, qecOn, rotDeg, t1, t2 };
-  }, [codeId, noise, p, rounds, theta, phi, qecOn, rotDeg, t1, t2]);
-
-  const orbitRef = useRef(orbit);
-  useEffect(() => { orbitRef.current = orbit; }, [orbit]);
-  useEffect(() => {
-    setAuto(orbitRef.current);
-    wakeRef.current();
-  }, [orbit]);
-  const endDragKeep = () => {
-    onPointerUp();
-    onPointerLeave();
-    setAuto(orbitRef.current);
-    wakeRef.current();
-  };
+    cfgRef.current = { codeId, noise, p, rounds, theta, phi, qecOn };
+  }, [codeId, noise, p, rounds, theta, phi, qecOn]);
 
   const reset = () => {
     const c = cfgRef.current;
@@ -192,7 +172,7 @@ export function BlochFlight() {
       if (!sv || !bare) return;
       const c = cfgRef.current;
       const code = getSVCode(c.codeId);
-      const params = noiseParams(c.p, c.noise, { rotDeg: c.rotDeg, T1: c.t1, T2: c.t2 });
+      const params = noiseParams(c.p);
 
       const r = runLiveRound(code, sv, c.noise, params, rngRef.current, c.theta, c.phi, c.qecOn);
       const b = runBareRound(bare, c.noise, params, rngRef.current, c.theta, c.phi);
@@ -226,12 +206,12 @@ export function BlochFlight() {
     };
 
     const drawFidelityStrip = (ctx: CanvasRenderingContext2D, w: number, h: number) => {
-      // mini live fidelity chart (bottom strip) with axis + fail line
-      const stripH = 96;
-      const x0 = 14, y0 = h - stripH - 10, stripW = Math.min(380, w * 0.48);
+      // mini live fidelity chart (bottom strip)
+      const stripH = 74;
+      const x0 = 14, y0 = h - stripH - 10, stripW = Math.min(330, w * 0.45);
       ctx.save();
-      ctx.fillStyle = 'rgba(13,10,26,0.78)';
-      ctx.strokeStyle = 'rgba(139,92,246,0.4)';
+      ctx.fillStyle = 'rgba(13,10,26,0.72)';
+      ctx.strokeStyle = 'rgba(139,92,246,0.35)';
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.roundRect(x0, y0, stripW, stripH, 8);
@@ -241,61 +221,29 @@ export function BlochFlight() {
       const q = histQRef.current.slice(-240);
       const b = histBRef.current.slice(-240);
       const n = Math.max(q.length, 2);
-      const plotX = x0 + 30;
-      const plotW = stripW - 38;
-      const plotY = y0 + 8;
-      const plotH = stripH - 30;
-
-      // fail line at F = 0.5
-      ctx.strokeStyle = 'rgba(251,113,133,0.5)';
-      ctx.setLineDash([4, 3]);
-      ctx.beginPath();
-      ctx.moveTo(plotX, plotY + plotH * 0.5);
-      ctx.lineTo(plotX + plotW, plotY + plotH * 0.5);
-      ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.font = '8px ui-monospace, monospace';
-      ctx.fillStyle = 'rgba(251,113,133,0.9)';
-      ctx.fillText('50%', x0 + 6, plotY + plotH * 0.5 + 3);
-      ctx.fillStyle = 'rgba(148,163,184,0.8)';
-      ctx.fillText('100%', x0 + 6, plotY + 4);
-
-      const line = (arr: number[], color: string, fill: boolean) => {
+      const line = (arr: number[], color: string) => {
         if (arr.length < 2) return;
-        if (fill) {
-          ctx.beginPath();
-          ctx.moveTo(plotX, plotY + plotH);
-          for (let i = 0; i < arr.length; i++) {
-            const x = plotX + (i / (n - 1)) * plotW;
-            const y = plotY + (1 - Math.max(0, Math.min(1, arr[i]))) * plotH;
-            ctx.lineTo(x, y);
-          }
-          ctx.lineTo(plotX + ((arr.length - 1) / (n - 1)) * plotW, plotY + plotH);
-          ctx.closePath();
-          ctx.fillStyle = 'rgba(167,139,250,0.12)';
-          ctx.fill();
-        }
         ctx.strokeStyle = color;
-        ctx.lineWidth = 1.8;
+        ctx.lineWidth = 1.6;
         ctx.beginPath();
         for (let i = 0; i < arr.length; i++) {
-          const x = plotX + (i / (n - 1)) * plotW;
-          const y = plotY + (1 - Math.max(0, Math.min(1, arr[i]))) * plotH;
+          const x = x0 + 6 + (i / (n - 1)) * (stripW - 12);
+          const y = y0 + 6 + (1 - Math.max(0, Math.min(1, arr[i]))) * (stripH - 14);
           if (i === 0) ctx.moveTo(x, y);
           else ctx.lineTo(x, y);
         }
         ctx.stroke();
       };
-      line(b, 'rgba(244,114,182,0.85)', false);
-      line(q, 'rgba(167,139,250,0.95)', true);
+      line(b, 'rgba(244,114,182,0.85)');
+      line(q, 'rgba(167,139,250,0.95)');
 
       ctx.font = '9px ui-monospace, monospace';
       ctx.fillStyle = 'rgba(167,139,250,1)';
-      ctx.fillText('F with QEC', x0 + 34, y0 + stripH - 16);
+      ctx.fillText('F with QEC', x0 + 8, y0 + 12);
       ctx.fillStyle = 'rgba(244,114,182,1)';
-      ctx.fillText('F bare', x0 + 108, y0 + stripH - 16);
+      ctx.fillText('F bare', x0 + 76, y0 + 12);
       ctx.fillStyle = 'rgba(148,163,184,0.9)';
-      ctx.fillText('live fidelity — last rounds', x0 + 34, y0 + stripH - 5);
+      ctx.fillText('live fidelity — last rounds', x0 + 8, y0 + stripH - 6);
       ctx.restore();
     };
 
@@ -309,8 +257,6 @@ export function BlochFlight() {
       const now = performance.now();
       const dt = Math.min(0.1, (now - lastRef.current) / 1000);
       lastRef.current = now;
-      const camO = cam.current as Cam;
-      if (camO.auto) camO.yaw += dt * 0.13; // gentle idle orbit
 
       // ---- ONE-SHOT physics: play exactly c.rounds rounds, then stop for good
       if (phaseRef.current === 'playing') {
@@ -353,15 +299,9 @@ export function BlochFlight() {
       const cx = w / 2;
       const cy = h * 0.47;
       const scale = Math.min(w, h) * 0.33;
+      const camO = cam.current as Cam;
 
-      drawWireSphere(ctx, camO, cx, cy, scale, 'rgba(134,126,205,0.62)');
-
-      // target pin — the state the flight started from (QEC tries to hold it)
-      const tTheta = c.theta, tPhi = c.phi;
-      const target: Vec3 = { x: Math.sin(tTheta) * Math.cos(tPhi), y: Math.cos(tTheta), z: Math.sin(tTheta) * Math.sin(tPhi) };
-      dot3D(ctx, target, camO, cx, cy, scale, 'rgba(103,232,249,0.28)', 9, 0);
-      dot3D(ctx, target, camO, cx, cy, scale, 'rgba(103,232,249,0.95)', 3, 10);
-      label3D(ctx, 'target |ψ⟩', { x: target.x * 1.16, y: target.y * 1.16, z: target.z * 1.16 }, camO, cx, cy, scale, 'rgba(103,232,249,0.95)', '10px ui-sans-serif', 6, -6);
+      drawWireSphere(ctx, camO, cx, cy, scale);
 
       // axes + labels
       const axes: { v: Vec3; label: string }[] = [
@@ -387,24 +327,15 @@ export function BlochFlight() {
       const drawTrail = (trail: { v: Vec3; t: number }[]) => {
         for (let i = 1; i < trail.length; i++) {
           const age = 1 - i / trail.length;
-          stroke3D(ctx, [trail[i - 1].v, trail[i].v], camO, cx, cy, scale, trailColor(1 - age), 2.8 - age * 1.4);
+          stroke3D(ctx, [trail[i - 1].v, trail[i].v], camO, cx, cy, scale, trailColor(1 - age), 2.1 - age * 1.2);
         }
         if (trail.length) {
           const newest = trail[trail.length - 1];
-          dot3D(ctx, newest.v, camO, cx, cy, scale, 'rgba(103,232,249,0.9)', 2.6, 9);
+          dot3D(ctx, newest.v, camO, cx, cy, scale, 'rgba(103,232,249,0.9)', 2.2, 6);
         }
       };
       drawTrail(trailQRef.current);
       drawTrail(trailBRef.current);
-
-      // round progress on-canvas while playing
-      if (phaseRef.current === 'playing') {
-        ctx.save();
-        ctx.font = 'bold 12px ui-monospace, monospace';
-        ctx.fillStyle = 'rgba(226,232,240,0.92)';
-        ctx.fillText(`round ${Math.min(roundRef.current, c.rounds)} / ${c.rounds}`, w - 132, 26);
-        ctx.restore();
-      }
 
       // vectors
       drawArrow3D(ctx, dispBRef.current, camO, cx, cy, scale, '#f472b6', 2.2, true);
@@ -432,7 +363,7 @@ export function BlochFlight() {
         Math.abs(dispBRef.current.x - vecBRef.current.x) < 0.004 &&
         Math.abs(dispBRef.current.y - vecBRef.current.y) < 0.004 &&
         Math.abs(dispBRef.current.z - vecBRef.current.z) < 0.004;
-      return phaseRef.current === 'playing' || !settled || camO.auto;
+      return phaseRef.current === 'playing' || !settled;
     };
 
     const loop = () => {
@@ -532,7 +463,7 @@ export function BlochFlight() {
 
   return (
     <div className="grid gap-4 xl:grid-cols-[340px_1fr]">
-      <Card className="glass border-white/8">
+      <Card className="border-violet-500/20 bg-[#141126]">
         <CardContent className="flex flex-col gap-4 p-5">
           <div>
             <h3 className="text-sm font-semibold text-slate-100">Bloch Flight Controls</h3>
@@ -541,7 +472,7 @@ export function BlochFlight() {
               full spacetime history.
             </p>
           </div>
-          <GuideField label="QEC Code" info={{ what: 'Which code protects the flying logical qubit. This visualizer uses the full state-vector engine, so the list shows state-vector codes only.', how: 'Pick any — the flight resets and re-encodes. Small codes correct coarsely but fast; Shor [[9,1,3]] and Steane [[7,1,3]] correct more before losing ground.', example: '3-Qubit Bit-Flip survives a single X error in every single round.' }}>
+          <GuideField label="QEC Code" info={{ what: 'Which code protects the flying logical qubit. This visualizer uses the full state-vector engine and the two codes of all_with_noise_prob.py.', how: 'Pick one — the flight resets and re-encodes. Both are distance-3 codes that fix any single error of their target type before losing ground.', example: '3-Qubit Bit-Flip survives a single X error in every single round.' }}>
             <Select value={codeId} onValueChange={setCodeId}>
               <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
               <SelectContent className="max-h-72">
@@ -551,7 +482,7 @@ export function BlochFlight() {
               </SelectContent>
             </Select>
           </GuideField>
-          <GuideField label="Noise Model" info={{ what: 'The physical disturbance applied EVERY round to all qubits of the block — the same channel also hits the bare comparison qubit.', how: 'Pick one. Bit-flip/phase-flip/depolarizing are random hits; coherent rotation is a systematic tilt; thermal relaxation is realistic hardware decay.', example: 'Bit-Flip at 10%: each round, every qubit independently risks flipping.' }}>
+          <GuideField label="Noise Model" info={{ what: 'The physical disturbance applied EVERY round to all qubits of the block — the same channel also hits the bare comparison qubit.', how: 'Pick one of the three channels of all_with_noise_prob.py: Bit-Flip (X), Phase-Flip (Z) or Depolarizing.', example: 'Bit-Flip at 10%: each round, every qubit independently risks flipping.' }}>
             <Select value={noise} onValueChange={(v) => setNoise(v as NoiseModelId)}>
               <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
               <SelectContent>
@@ -561,7 +492,7 @@ export function BlochFlight() {
               </SelectContent>
             </Select>
           </GuideField>
-          {noise !== 'thermal-relaxation' && noise !== 'coherent-rotation' && (
+          {(
             <GuideField
               label="Noise strength p"
               info={{ what: 'The per-round probability that each qubit is hit by the selected noise. This drives how violently the trajectory is kicked.', how: 'Drag from 0 to 50%. Around or above 20–30%, most small codes stop coping — watch the violet arrow start to wander.', example: 'p = 0.10 → typically a couple of errors per dozen rounds; the decoder absorbs them.' }}
@@ -571,29 +502,6 @@ export function BlochFlight() {
               <Slider value={[Math.round(p * 500)]} min={0} max={250} step={1} onValueChange={(v) => setP(v[0] / 500)} />
             </GuideField>
           )}
-          {noise === 'coherent-rotation' && (
-            <GuideField
-              label="Error rotation angle"
-              info={{ what: 'A coherent error tilts EVERY qubit by the same angle every round — a miscalibrated gate. The slider sets that angle.', how: 'Small angles (1–15°) are realistic; large angles show coherent errors overpowering the code.', example: '10° per round accumulates fast — watch the syndrome fire every round.' }}
-              hint="Same tilt every round."
-              right={<span className="font-mono text-violet-300">{rotDeg.toFixed(1)}°</span>}
-            >
-              <Slider value={[rotDeg]} min={0} max={90} step={0.5} onValueChange={(v) => setRotDeg(v[0])} />
-            </GuideField>
-          )}
-          {noise === 'thermal-relaxation' && (
-            <GuideField
-              label="T₁ / T₂ (gate times)"
-              info={{ what: 'T1 = energy-loss time, T2 = dephasing time, per round. Small values = harsh hardware that decays quickly.', how: 'Set both sliders (T2 is capped at 2×T1, as physics demands).', example: 'T1 = T2 = 5 → the bare qubit loses most of its fidelity within ~10 rounds.' }}
-              hint="Decay times per round. Small = harsh."
-              right={<span className="font-mono text-violet-300">{t1.toFixed(1)}/{t2.toFixed(1)}</span>}
-            >
-              <div className="flex flex-col gap-1.5">
-                <Slider value={[Math.round(t1 * 4)]} min={2} max={80} step={1} onValueChange={(v) => { const nv = v[0] / 4; setT1(nv); if (t2 > 2 * nv) setT2(2 * nv); }} />
-                <Slider value={[Math.round(t2 * 4)]} min={2} max={Math.round(2 * t1 * 4)} step={1} onValueChange={(v) => setT2(v[0] / 4)} />
-              </div>
-            </GuideField>
-          )}
           <GuideField label="Input State |ψ⟩" info={{ what: 'The state the logical qubit starts in, shown as an arrow on the Bloch sphere (θ from the |0⟩ pole, φ around the axis).', how: 'Click a preset or pick Custom and use the two sliders below. The flight re-encodes from this state.', example: '|+i⟩ starts on the equator — a good stress test because both amplitude and phase must survive.' }}>
             <div className="flex flex-wrap gap-1.5">
               {STATE_PRESETS.map((s) => (
@@ -601,7 +509,7 @@ export function BlochFlight() {
                   key={s.label}
                   size="sm"
                   variant={preset === s.label ? 'default' : 'outline'}
-                  className={preset === s.label ? 'bg-violet-600 hover:bg-violet-500' : 'border-violet-400/30 bg-white/[0.03] text-slate-300'}
+                  className={preset === s.label ? 'bg-violet-600 hover:bg-violet-500' : 'border-violet-500/30 text-slate-300'}
                   onClick={() => applyPreset(s.label)}
                 >
                   {s.label}
@@ -619,7 +527,7 @@ export function BlochFlight() {
             <Slider value={[rounds]} min={10} max={100} step={5} onValueChange={(v) => setRounds(v[0])} />
           </GuideField>
           <GuideField label="QEC correction" info={{ what: 'Turns the decoder on or off for the run. OFF shows raw decoherence — the honest “before” picture with no protection.', how: 'Set it before a run, or flip it mid-run while the flight is playing. With QEC ON the violet arrow snaps back to its target; with OFF it random-walks away like the pink ghost.', example: 'Run 30 rounds with QEC OFF and watch the violet arrow wander — flip ON and run again to watch the decoder drag it home.' }}>
-            <div className="flex items-center justify-between rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2">
+            <div className="flex items-center justify-between rounded-lg border border-violet-500/20 px-3 py-2">
               <span className="text-[11px] text-slate-400">{qecOn ? 'ON — decoder cleans every round' : 'OFF — watching raw decoherence'}</span>
               <Switch checked={qecOn} onCheckedChange={setQecOn} />
             </div>
@@ -632,7 +540,7 @@ export function BlochFlight() {
               <RotateCcw className="mr-1 h-3.5 w-3.5" /> Reset
             </Button>
           </div>
-          <div className="flex items-center justify-between rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2">
+          <div className="flex items-center justify-between rounded-lg border border-violet-500/20 px-3 py-2">
             <span className="text-[11px] text-slate-400">
               {phase === 'idle' ? 'idle — press Run flight' : phase === 'playing' ? `running — round ${hud.round} / ${rounds}` : 'complete — simulation stopped'}
             </span>
@@ -643,29 +551,25 @@ export function BlochFlight() {
             <StatChip label="Corrections" value={String(hud.corrections)} tone="good" />
           </div>
           <ExportRow onReport={exportReport} onJSON={exportJSONData} onCSV={exportCSVData} />
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] text-slate-400">Auto-orbit camera</span>
-            <Switch checked={orbit} onCheckedChange={setOrbit} />
-          </div>
           <span className="flex items-center gap-1.5 text-[10px] text-slate-500">
             <MousePointer2 className="h-3 w-3" /> drag to orbit · wheel to zoom
           </span>
         </CardContent>
       </Card>
 
-      <Card className="glass-deep overflow-hidden border-white/8">
+      <Card className="overflow-hidden border-violet-500/20 bg-gradient-to-b from-[#0e0b1e] to-[#130f28]">
         <CardContent className="relative p-2">
           <canvas
             ref={canvasRef}
             className="h-[560px] w-full cursor-grab touch-none rounded-lg active:cursor-grabbing"
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
-            onPointerUp={endDragKeep}
-            onPointerLeave={endDragKeep}
+            onPointerUp={onPointerUp}
+            onPointerLeave={onPointerLeave}
           />
           <Badge className="absolute right-4 top-4 bg-violet-600/25 text-violet-200 hover:bg-violet-600/25">4D · space + time trail</Badge>
           <div className="absolute right-4 top-12 flex flex-col items-end gap-1.5">
-            <div className="rounded-lg border border-white/12 bg-black/50 px-3 py-2 text-right backdrop-blur">
+            <div className="rounded-lg border border-violet-500/25 bg-[#0d0b1acc] px-3 py-2 text-right backdrop-blur">
               <div className="text-[10px] uppercase tracking-wide text-slate-500">F with QEC (now)</div>
               <div className={`font-mono text-xl font-bold ${(hud.fQEC * 100).toFixed(1) === '100.0' || hud.fQEC > 0.99 ? 'text-emerald-400' : hud.fQEC > 0.9 ? 'text-violet-300' : 'text-rose-400'}`}>
                 {(hud.fQEC * 100).toFixed(1)}%
@@ -707,56 +611,55 @@ const SUBTABS = [
     icon: Orbit,
     title: 'Bloch Flight — 4D QEC Trajectory (one-shot run)',
     blurb:
-      'A logical qubit flies through a fixed number of noisy rounds, then the flight stops. The colored trail is time itself — the 4th dimension: watch QEC hold the state on its target while the unprotected ghost drifts away.',
+      'A logical qubit flies through a fixed number of noise + correction rounds — you choose how many — then the flight stops. The time-colored trail is the 4th dimension: watch QEC pin the state to its target while the bare ghost wanders away.',
     reading: [
-      'Violet arrow = protected logical qubit · pink dashed = same noise, no protection.',
-      'Trail color = time: cyan is “now”, deep violet is older — the 4th dimension made visible.',
-      'Press Run: it plays exactly N rounds once, stops with “complete — stopped”, and you can orbit the result.',
+      'Violet arrow = logical qubit WITH error correction · pink dashed = bare qubit receiving the identical noise.',
+      'Trail colour encodes time: cyan = now, deep violet = older rounds — the 4th dimension made visible.',
+      'Press Run flight: the sim plays exactly N rounds once, then halts with “complete — stopped”. Re-run any time.',
     ],
-    tryThis: 'Turn “QEC correction” OFF, run 30 rounds and watch the violet arrow wander off with the pink ghost. Turn it back ON, run again, and watch the decoder pull it home.',
+    tryThis: 'Set “QEC correction” OFF, run 30 rounds and watch the violet arrow join the pink ghost\u2019s random walk — then switch it back ON, run again, and watch the decoder drag it home.',
   },
   {
     id: 'city',
     label: 'State Cityscape 3D',
     icon: Boxes,
-    title: 'State Cityscape — Live Amplitude City',
+    title: 'State Cityscape — Live Amplitude Landscape',
     blurb:
-      'The encoded block drawn as a real city: one shaded tower per basis state on a proper street grid. Tower height is its probability and its color is the complex phase. Noise grows error towers; every correction cycle flattens the skyline back to the codespace.',
+      'The encoded 3-qubit register drawn as a 3-D city: bar height is amplitude magnitude, color is complex phase. Noise raises skyline in error states; every correction cycle flattens it back to the codespace.',
     reading: [
-      'Each tower = one basis state |abc…⟩; height = probability, color = complex phase.',
-      'A healthy repetition-family state has exactly TWO towers — the all-0 and all-1 codespace pair (cyan rings).',
+      'Each tower = one basis state |abc⟩ of the encoded block; height = its probability, colour = complex phase.',
+      'A healthy encoded state has exactly TWO towers (the codespace pair, e.g. |000⟩ and |111⟩).',
       'Noise sprouts extra towers (errors); each correction cycle flattens the skyline back to two.',
-      'Pick a 5-qubit code and the city grows to 32 live towers — same engine, bigger skyline.',
     ],
     tryThis: 'Raise the noise until a third tower appears, then watch QEC flatten it back — you just watched an error being detected and undone, live in 3D.',
   },
   {
     id: 'spacetime',
-    label: 'Spacetime Lattice 4D',
+    label: 'Syndrome Spacetime 4D',
     icon: Network,
-    title: 'Spacetime Lattice — 4D Surface-Code Decoding',
+    title: 'Syndrome Spacetime — the Bit-Flip Code over Time (one-shot run)',
     blurb:
-      'The surface code in genuine 4 dimensions: a d×d sheet of qubits, one floor per syndrome round, stacked upward through time (up to d = 9 and 16 rounds). Errors accumulate, defect stars light up, and the MWPM decoder draws its matching chains through spacetime — the picture real decoders compute.',
+      'The 3-Qubit Bit-Flip code in genuine 4 dimensions: the 3 data qubits and 2 syndrome checks drawn as wires, with correction rounds stacked upward as time. Noise hits, syndrome defects and decoder corrections appear exactly as the engine produces them.',
     reading: [
-      'Each glowing floor = one syndrome round of the d×d lattice; stacking floors upward IS the 4th dimension.',
-      'Stars = syndrome defects (errors); dashed chains = the decoder\u2019s repairs through spacetime.',
-      'A red flash marks a logical failure — the decoder paired defects the wrong way and the block restarts.',
+      'Violet worldlines = the 3 data qubits (q0, q1, q2); cyan dashed = the two Z-parity syndrome checks (q3, q4 in the Python circuit).',
+      'Red dots = X noise hits · amber stars = syndrome defects · green rings = the decoder\u2019s correction · red floors = rounds where the block was hit beyond the code\u2019s protection.',
+      'Press Run spacetime: the sim plays exactly N rounds once, then halts with “complete — stopped”. Re-run any time.',
     ],
-    tryThis: 'Set noise to ~12% with d = 5 and watch matching chains start to mispair — the seeds of logical errors. Drop to 6% and the lattice cleans itself round after round.',
+    tryThis: 'Run 14 rounds at p = 0.10 and count the amber defects — then raise p to 0.25 and watch the first red logical-failure floors appear when TWO data qubits are hit in the same round.',
   },
   {
-    id: 'terrain',
-    label: 'Threshold Terrain 4D',
-    icon: LandPlot,
-    title: 'Threshold Terrain — 2,500+ Live Experiments (large-scale Monte Carlo)',
+    id: 'bloch3d',
+    label: 'Bloch Sphere 3D',
+    icon: Globe,
+    title: 'Bloch Sphere — Interactive Pipeline Walkthrough',
     blurb:
-      'The big one: thousands of complete surface-code experiments run live in your browser — one bar per (noise level, code size) pair — building a 3-D map of how often each code fails. Watch the famous surface-code threshold appear from raw data: below it, bigger codes win; above it, they stop helping.',
+      'A dedicated interactive Bloch sphere: choose the input state |ψ(θ, φ)⟩ and a noise channel, press Run, and watch the logical qubit walk the full pipeline stage by stage — input → encoded → after noise → syndrome → corrected → decoded — with the bare-qubit ghost alongside.',
     reading: [
-      'Each bar = one measured logical error rate from ~120 complete experiments (2,520+ per run).',
-      'Left → right: noise gets stronger. Front → back: code grows from d = 3 to d = 7.',
-      'Green bars fail rarely; red bars fail often. The “hill” that flips the ordering is the threshold.',
+      'The violet arrow is the LOGICAL qubit at the current pipeline stage; faded markers show where it has already been.',
+      'The pink dashed arrow is a bare qubit hit by the same noise stream — no encoding, no protection.',
+      'The HUD reports the live stage, the measured syndrome (e.g. 01 → q0 error) and the correction the decoder applied.',
     ],
-    tryThis: 'Run it once and read the verdict line — then switch the noise model to Depolarizing and run again: the threshold moves. You are measuring real research-grade physics, live.',
+    tryThis: 'Set the noise to Bit-Flip (X) at p = 0.30 and run — the syndrome flags one qubit, the decoder pulls the violet arrow home, while the pink ghost drifts away. Then switch QEC OFF and run again to see the difference.',
   },
 ];
 
@@ -769,9 +672,10 @@ export default function QuantumLab3D() {
       <div>
         <h2 className="mb-1 text-xl font-semibold text-slate-100">3D Quantum Lab — Real-Time Simulation Suite</h2>
         <p className="text-sm text-slate-500">
-          Four physics-driven 3D/4D visualizers powered by the same verified QEC engine — from a single flying qubit to
-          <span className="text-violet-300"> 2,500+ live Monte Carlo experiments</span>. Every simulation is a one-shot
-          run: press Run, watch it play through, and it stops when complete. Orbit, zoom and export reports from any of them.
+          Physics-driven 3D and 4D visualizers powered by the full QEC engine — every one built strictly around this
+          project&apos;s two codes and three noise channels. Every simulation is a
+          <span className="text-violet-300"> one-shot run</span>: press Run, watch it play through, and it stops when
+          complete. Orbit, zoom and export reports from any of them.
         </p>
       </div>
 
@@ -786,7 +690,7 @@ export default function QuantumLab3D() {
               className={`flex items-center gap-2 rounded-xl border px-4 py-2.5 text-xs font-medium transition-all ${
                 on
                   ? 'border-violet-400/60 bg-violet-600/25 text-violet-100 shadow-[0_0_18px_rgba(139,92,246,0.25)]'
-                  : 'border-white/10 bg-white/[0.03] text-slate-400 hover:border-violet-400/40 hover:text-slate-200'
+                  : 'border-violet-500/20 bg-[#141126] text-slate-400 hover:border-violet-500/40 hover:text-slate-200'
               }`}
             >
               <Icon className="h-4 w-4" />
@@ -796,12 +700,12 @@ export default function QuantumLab3D() {
         })}
       </div>
 
-      <div className="rounded-xl glass border-white/8 px-4 py-3">
+      <div className="rounded-xl border border-violet-500/15 bg-gradient-to-r from-[#161030] to-[#101426] px-4 py-3">
         <div className="text-sm font-semibold text-slate-100">{active.title}</div>
         <div className="mt-0.5 text-xs leading-relaxed text-slate-400">{active.blurb}</div>
         <div className="mt-3 grid gap-2 md:grid-cols-3">
           {active.reading.map((r) => (
-            <div key={r} className="rounded-lg border border-cyan-400/15 bg-cyan-400/[0.04] p-2.5 text-[11px] leading-relaxed text-slate-300">{r}</div>
+            <div key={r} className="rounded-lg border border-cyan-500/20 bg-[#0d1420]/80 p-2.5 text-[11px] leading-relaxed text-slate-300">{r}</div>
           ))}
         </div>
         <div className="mt-2 flex items-start gap-1.5 text-[11px] leading-relaxed text-amber-200/90">
@@ -812,8 +716,8 @@ export default function QuantumLab3D() {
 
       {sub === 'flight' && <BlochFlight />}
       {sub === 'city' && <StateCityscape />}
-      {sub === 'spacetime' && <SpacetimeLab />}
-      {sub === 'terrain' && <ThresholdTerrain />}
+      {sub === 'spacetime' && <SyndromeSpacetime />}
+      {sub === 'bloch3d' && <BlochSphere3D />}
     </div>
   );
 }

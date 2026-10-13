@@ -1,16 +1,14 @@
 {
-  "name": "nextjs_tailwind_shadcn_ts",
-  "version": "6.0.0",
+  "name": "qec-simulator",
+  "version": "8.0.0",
   "private": true,
+  "description": "Interactive Quantum Error Correction Simulator — Focused Edition. Exactly the scope of all_with_noise_prob.py: 2 QEC codes × 3 noise channels, verified state-vector engine, 3D/4D lab, exports with embedded circuits.",
   "scripts": {
-    "dev": "next dev -p 3000 2>&1 | tee dev.log",
-    "build": "next build && cp -r .next/static .next/standalone/.next/ && cp -r public .next/standalone/",
-    "start": "NODE_ENV=production bun .next/standalone/server.js 2>&1 | tee server.log",
+    "dev": "next dev -p 3000",
+    "build": "next build",
+    "start": "next start",
     "lint": "eslint .",
-    "db:push": "prisma db push --accept-data-loss",
-    "db:generate": "prisma generate",
-    "db:migrate": "prisma migrate dev",
-    "db:reset": "prisma migrate reset"
+    "test": "bun scripts/test-qec.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
@@ -18,7 +16,6 @@
     "@dnd-kit/utilities": "^3.2.2",
     "@hookform/resolvers": "^5.1.1",
     "@mdxeditor/editor": "^3.39.1",
-    "@prisma/client": "^6.11.1",
     "@radix-ui/react-accordion": "^1.2.11",
     "@radix-ui/react-alert-dialog": "^1.1.14",
     "@radix-ui/react-aspect-ratio": "^1.1.7",
@@ -61,7 +58,6 @@
     "next-auth": "^4.24.11",
     "next-intl": "^4.3.4",
     "next-themes": "^0.4.6",
-    "prisma": "^6.11.1",
     "react": "^19.0.0",
     "react-day-picker": "^9.8.0",
     "react-dom": "^19.0.0",
@@ -90,6 +86,5 @@
     "tailwindcss": "^4",
     "tw-animate-css": "^1.3.5",
     "typescript": "^5"
-  },
-  "description": "Interactive Quantum Error Correction Simulator \u2014 Phase 2 prototype. Fully client-side QEC simulation with aurora-glass UI, live pipeline playback, streaming Monte Carlo, Code Showdown, 3D/4D real-time visualizers and exportable reports."
+  }
 }

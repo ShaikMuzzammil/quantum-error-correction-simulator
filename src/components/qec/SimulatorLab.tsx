@@ -2,12 +2,15 @@
 
 /**
  * Simulator Lab: single-shot QEC pipeline visualization.
- * State-vector codes show the full pipeline (encode → noise → syndrome →
- * correct → decode → measure); surface codes show the lattice with
- * click-to-inject error teaching mode.
+ * Implements exactly the pipeline of all_with_noise_prob.py — 3-Qubit
+ * Bit-Flip / Phase-Flip QEC under Bit-Flip (X), Phase-Flip (Z) or
+ * Depolarizing noise — with the full stage walkthrough (encode → noise →
+ * syndrome → correct → decode → measure), the exact Python circuit view,
+ * the Python "QEC STATUS" verdict and PDF/JSON/CSV exports (report
+ * includes the real circuit diagram).
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Slider } from '@/components/ui/slider';
@@ -15,29 +18,30 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
-import { Play, Dices, Zap, CircleCheck, CircleX, Info, FileText, Braces, Cpu, ScanSearch, Wand2, CornerDownLeft, Target, RotateCcw } from 'lucide-react';
+import { Play, Dices, Zap, CircleCheck, CircleX, Info, FileText, Braces, Orbit } from 'lucide-react';
 import { runTrace, ShotTrace } from '@/lib/qec/pipeline';
-import { getSVCode } from '@/lib/qec/codes';
+import { getSVCode, pythonQecStatus } from '@/lib/qec/codes';
 import { NoiseModelId, NoiseParams, noiseParams } from '@/lib/qec/noise';
 import { CODE_REGISTRY, getCodeMeta } from '@/lib/qec/registry';
-import { runSurfaceShot, SurfaceNoise } from '@/lib/qec/surface';
 import { makeRng } from '@/lib/qec/engine';
 import { downloadJSON, downloadCSV, openPrintableReport, runId, nowStamp, TEAM_NAMES } from '@/lib/report';
 import BlochSphere from './BlochSphere';
 import CircuitDiagram from './CircuitDiagram';
-import SurfaceGrid, { CellState } from './SurfaceGrid';
+import PythonCircuitCard, { pythonCircuitSVG } from './PythonCircuit';
+import { buildPythonCircuit } from '@/lib/qec/codes';
 import { GuideField, HowToCard, ResultTabs, StepList, MeaningCard, TryBox, GuideInfo } from './Guide';
 
 const NOISE_LABELS: Record<string, string> = {
-  bitflip: 'Bit-Flip (X)',
-  phaseflip: 'Phase-Flip (Z)',
-  depolarizing: 'Depolarizing',
-  'amplitude-damping': 'Amplitude Damping',
-  'phase-damping': 'Phase Damping',
-  'thermal-relaxation': 'Thermal Relaxation',
-  'coherent-rotation': 'Coherent Rotation',
-  crosstalk: 'Crosstalk',
+  bitflip: 'Bit-Flip Noise (X)',
+  phaseflip: 'Phase-Flip Noise (Z)',
+  depolarizing: 'Depolarizing Noise',
 };
+
+/* per-qubit manual injection state: 0=I, 1=X, 2=Z, 3=Y */
+type CellState = 0 | 1 | 2 | 3;
+
+/* Python file menu numbers */
+const NOISE_PYTYPE: Record<string, 1 | 2 | 3> = { bitflip: 1, phaseflip: 2, depolarizing: 3 };
 
 const STATE_PRESETS = [
   { label: '|0⟩', theta: 0, phi: 0 },
@@ -52,26 +56,20 @@ const STATE_PRESETS = [
 
 const CODE_INFO: GuideInfo = {
   what: "A quantum error correction (QEC) code spreads ONE logical qubit's information across several physical qubits, so hardware errors can be detected and undone. The label [[n,k,d]] means: n = physical qubits used, k = logical qubits protected, d = code distance — the code fixes any ⌊(d−1)/2⌋ errors.",
-  how: "Pick any code from the dropdown — every one runs live in your browser. New here? Start with '3-Qubit Bit-Flip', the same code as the Phase-1 worked example. Codes marked 'surface' switch to a 2-D lattice engine with a matching decoder.",
+  how: "Pick one of the two codes from the dropdown — both run live in your browser and both come straight from all_with_noise_prob.py: 1) the 3-Qubit Bit-Flip code and 2) the 3-Qubit Phase-Flip code.",
   example: 'Choosing 3-Qubit Bit-Flip [[3,1,3]] uses 3 physical qubits to protect 1 logical qubit and can fix any single bit-flip (X) error.',
 };
 
 const NOISE_INFO: GuideInfo = {
-  what: 'The physical disturbance applied to your qubits. Real quantum hardware is never perfect: values flip (bit-flip X), phases flip (Z), energy leaks to the environment (amplitude damping), or errors arrive mixed (depolarizing). This simulator implements 8 channels.',
-  how: "Choose a channel — the list only shows models compatible with the selected code (surface codes support Pauli-type noise only). Not sure? Keep Bit-Flip (X): it is the classic, easiest-to-follow example.",
-  example: 'Bit-Flip (X) at 10%: on every shot, each qubit independently has a 10% chance of flipping |0⟩↔|1⟩.',
+  what: 'The physical disturbance applied to your qubits. The Python reference implements exactly three channels: 1. Bit-Flip Noise (X), 2. Phase-Flip Noise (Z) and 3. Depolarizing Noise — and so does this simulator.',
+  how: 'Choose a channel from the dropdown. Not sure? Keep Bit-Flip (X): it is the classic, easiest-to-follow example and it MATCHES the bit-flip code.',
+  example: 'Bit-Flip Noise at 10%: on every shot, each qubit independently has a 10% chance of flipping |0⟩↔|1⟩.',
 };
 
 const P_INFO: GuideInfo = {
   what: 'The strength of the selected noise — the probability that each qubit is hit during one shot (0.100 = 10%). For coherent rotation the slider sets the error rotation angle instead.',
   how: 'Drag the slider. 10% is the Phase-1 example. Raise it to stress-test the code: at some point protection breaks down — that tipping point is the pseudo-threshold.',
   example: 'p = 0.10 with the 3-qubit bit-flip code → single errors are detected and corrected; the logical qubit survives nearly every shot.',
-};
-
-const CROSSTALK_INFO: GuideInfo = {
-  what: 'An extra correlated error channel: a gate on one qubit accidentally disturbs its neighbour — a well-documented hardware problem in ion traps (literature ref 4).',
-  how: 'Keep it small (1–5%). The main p slider still sets the base error rate; p_xtalk adds neighbour-pair errors on top.',
-  example: 'p = 0.10, p_xtalk = 0.02 → besides the base noise, each neighbouring pair has a 2% chance of being corrupted together.',
 };
 
 const STATE_INFO: GuideInfo = {
@@ -93,8 +91,8 @@ const PHI_INFO: GuideInfo = {
 };
 
 const MANUAL_INFO: GuideInfo = {
-  what: 'Instead of letting the random number generator decide, you place the errors yourself — deterministic and repeatable, perfect for reproducing the Phase-1 worked example.',
-  how: 'Switch ON, then click the qubit buttons (they cycle I → X → Z → Y), or for surface codes click lattice cells. Your errors are injected in every shot and the sampled noise is disabled.',
+  what: 'Instead of letting the random number generator decide, you place the error yourself — deterministic and repeatable, exactly like choosing an error qubit in the Python program.',
+  how: 'Switch ON, then click the qubit buttons (they cycle I → X → Z → Y). Your errors are injected in every shot and the sampled noise is disabled.',
   example: 'Turn ON, set q1 = X on the 3-qubit code, then Run Shot → the syndrome flags exactly that qubit and the decoder fixes it.',
 };
 
@@ -104,65 +102,29 @@ const SEED_INFO: GuideInfo = {
   example: 'Seed 42 on the default setup always produces the same noise event — run it twice and compare.',
 };
 
-interface SurfaceResult {
-  logicalError: boolean;
-  xErrors: [number, number][];
-  zErrors: [number, number][];
-  syndromeXDefects: [number, number][];
-  syndromeZDefects: [number, number][];
-  xCorrections: [number, number][];
-  zCorrections: [number, number][];
-  detected: boolean;
-}
-
 export default function SimulatorLab({ onNavigate }: { onNavigate?: (tab: string) => void }) {
   const [codeId, setCodeId] = useState('code-3bitflip');
   const [noise, setNoise] = useState<NoiseModelId>('bitflip');
   const [p, setP] = useState(0.1);
-  const [pCrosstalk, setPCrosstalk] = useState(0.02);
   const [theta, setTheta] = useState(0);
   const [phi, setPhi] = useState(0);
   const [statePreset, setStatePreset] = useState('|0⟩');
   const [seed, setSeed] = useState(42);
-  const [rotDeg, setRotDeg] = useState(10);
-  const [t1, setT1] = useState(5);
-  const [t2, setT2] = useState(5);
   const [manualMode, setManualMode] = useState(false);
   const [manualErrors, setManualErrors] = useState<Map<string, CellState>>(new Map());
   const [trace, setTrace] = useState<ShotTrace | null>(null);
-  const [surfaceResult, setSurfaceResult] = useState<SurfaceResult | null>(null);
   const [running, setRunning] = useState(false);
-  const [playStage, setPlayStage] = useState<number | null>(null); // null idle · 0..5 playing · 6 done
-  const playRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  // one-shot pipeline playback: advances the rail stage every 420ms, then stops
-  const startPlayback = () => {
-    if (playRef.current) clearInterval(playRef.current);
-    setPlayStage(0);
-    let s = 0;
-    playRef.current = setInterval(() => {
-      s += 1;
-      setPlayStage(Math.min(s, 6));
-      if (s >= 6 && playRef.current) {
-        clearInterval(playRef.current);
-        playRef.current = null;
-      }
-    }, 420);
-  };
-  useEffect(() => () => { if (playRef.current) clearInterval(playRef.current); }, []);
+  /* Python circuit reference view: input bit + error qubit (all_with_noise_prob.py inputs) */
+  const [pyBit, setPyBit] = useState<0 | 1>(0);
+  const [pyErr, setPyErr] = useState<0 | 1 | 2>(0);
 
   const codeMeta = useMemo(() => getCodeMeta(codeId), [codeId]);
-  const isSurface = codeMeta.engine === 'surface';
-  const d = isSurface ? codeMeta.d : 0;
-  const svCode = useMemo(() => (isSurface ? null : getSVCode(codeId)), [isSurface, codeId]);
+  const svCode = useMemo(() => getSVCode(codeId), [codeId]);
   const compatNoise = useMemo(() => codeMeta.compat, [codeMeta]);
 
   const switchCode = (id: string) => {
     setCodeId(id);
-    const meta = getCodeMeta(id);
-    if (!meta.compat.includes(noise)) setNoise(meta.compat[0]);
     setTrace(null);
-    setSurfaceResult(null);
   };
 
   const applyPreset = (label: string) => {
@@ -175,40 +137,22 @@ export default function SimulatorLab({ onNavigate }: { onNavigate?: (tab: string
     }
   };
 
-  const params: NoiseParams = noiseParams(p, noise, { rotDeg, T1: t1, T2: t2, pCrosstalk });
+  const params: NoiseParams = noiseParams(p);
 
   const runShot = () => {
     setRunning(true);
     try {
-      if (isSurface) {
-        const forced: [number, number, CellState][] = manualMode
-          ? [...manualErrors.entries()].map(([k, st]) => {
-              const [r, c] = k.split(',').map(Number);
-              return [r, c, st] as [number, number, CellState];
-            })
-          : [];
-        if (manualMode) {
-          // deterministic injection: run a modified shot by sampling with p=0 then applying errors
-          const res = runWithInjection(d, forced);
-          setSurfaceResult(res);
-        } else {
-          const res = runSurfaceShot(d, noise as SurfaceNoise, p, makeRng(seed));
-          setSurfaceResult(res);
-        }
-        setTrace(null);
-      } else {
-        const forced = manualMode
-          ? [...manualErrors.entries()].map(([k, st]) => ({
-              qubit: Number(k.split(',')[1]),
-              x: st === 1 || st === 3,
-              z: st === 2 || st === 3,
-            }))
-          : null;
-        const t = runTrace(svCode!, noise, params, theta, phi, seed, forced);
-        setTrace(t);
-        setSurfaceResult(null);
-      }
-      startPlayback();
+      const forced = manualMode
+        ? [...manualErrors.entries()].map(([k, st]) => ({
+            qubit: Number(k.split(',')[1]),
+            x: st === 1 || st === 3,
+            z: st === 2 || st === 3,
+          }))
+        : null;
+      const tr = runTrace(svCode, noise, params, theta, phi, seed, forced);
+      setTrace(tr);
+      // point the Python circuit view at the qubit this shot actually hit
+      if (tr.noiseEvents.length > 0) setPyErr((tr.noiseEvents[0].qubit as 0 | 1 | 2) ?? 0);
     } finally {
       setRunning(false);
     }
@@ -231,14 +175,13 @@ export default function SimulatorLab({ onNavigate }: { onNavigate?: (tab: string
 
   const configRows = (extra: [string, string][] = []): [string, string][] => {
     const base: [string, string][] = [
-      ['QEC code', `${codeMeta.name} — [[${codeMeta.n},${codeMeta.k},${codeMeta.d}]]`],
-      ['Engine', codeMeta.engine === 'surface' ? 'Pauli-frame stabilizer + MWPM decoder' : 'Full state-vector simulator'],
-      ['Noise model', NOISE_LABELS[noise] ?? noise],
+      ['QEC code', `${codeMeta.name} — [[${codeMeta.n},${codeMeta.k},${codeMeta.d}]] (Python QEC ${codeMeta.pythonType})`],
+      ['Engine', 'Full state-vector simulator (all_with_noise_prob.py pipeline)'],
+      ['Noise model', `${NOISE_LABELS[noise] ?? noise} (Python noise ${NOISE_PYTYPE[noise]})`],
       ['Noise strength p', p.toFixed(3)],
+      ['QEC status', pythonQecStatus(NOISE_PYTYPE[noise], codeMeta.pythonType).status],
+      ['Input state |ψ⟩', statePreset === 'Custom' ? `θ = ${theta.toFixed(2)} rad, φ = ${phi.toFixed(2)} rad` : statePreset],
     ];
-    if (!isSurface) base.push(['Input state |ψ⟩', statePreset === 'Custom' ? `θ = ${theta.toFixed(2)} rad, φ = ${phi.toFixed(2)} rad` : statePreset]);
-    if (noise === 'coherent-rotation') base.push(['Error rotation angle', `${rotDeg.toFixed(1)}° (${(rotDeg * Math.PI / 180).toFixed(3)} rad per qubit)`]);
-    if (noise === 'thermal-relaxation') base.push(['Thermal relaxation', `T1 = ${t1.toFixed(1)} gate times, T2 = ${t2.toFixed(1)} gate times`]);
     base.push(['RNG seed', String(seed)]);
     if (manualMode) {
       const desc = [...manualErrors.entries()].map(([k, st]) => `q${k.split(',')[1]}:${['I', 'X', 'Z', 'Y'][st]}`).join(' ') || 'none';
@@ -248,6 +191,7 @@ export default function SimulatorLab({ onNavigate }: { onNavigate?: (tab: string
   };
 
   const exportTraceReport = (t: ShotTrace) => {
+    const pyCircuit = buildPythonCircuit(codeMeta.pythonType, pyBit, pyErr);
     openPrintableReport(
       { title: `Single-Shot QEC Pipeline — ${t.codeName}`, runKind: 'Simulator Lab · Single Shot' },
       [
@@ -255,8 +199,13 @@ export default function SimulatorLab({ onNavigate }: { onNavigate?: (tab: string
           heading: 'Inputs (Experiment Configuration)',
           kv: configRows([
             ['Encoded state label', t.stateLabel],
-            ['Encoding method', t.projectionEncoding ? 'Stabilizer projection onto codespace' : 'Unitary encoding circuit'],
+            ['Encoding method', 'Unitary encoding circuit'],
           ]),
+        },
+        {
+          heading: 'Circuit — exact all_with_noise_prob.py implementation',
+          svg: pythonCircuitSVG(pyCircuit).svg,
+          note: `bit_flip/phase_flip_qec(${pyBit === 1 ? 'input_bit=1' : 'input_bit=0'}, error_qubit=${pyErr}) — 5 qubits + 3 classical bits, syndrome measurement and conditional corrections exactly as in the Python file.`,
         },
         {
           heading: 'Outputs (Results)',
@@ -287,7 +236,7 @@ export default function SimulatorLab({ onNavigate }: { onNavigate?: (tab: string
         },
         {
           heading: 'Methodology',
-          text: `The shot executes the complete Phase-1 pipeline: encode |ψ⟩ into the [[${codeMeta.n},${codeMeta.k},${codeMeta.d}]] codespace, sample the selected noise channel via quantum trajectories, measure every stabilizer generator projectively, apply the table-driven decoder correction, decode, and compute the logical fidelity against the target pure state. The bare-qubit baseline receives the identical noise. Team: ${TEAM_NAMES.join(', ')}.`,
+          text: `The shot executes the complete pipeline of all_with_noise_prob.py: encode |ψ⟩ into the [[${codeMeta.n},${codeMeta.k},${codeMeta.d}]] codespace, sample the selected noise channel via quantum trajectories, measure every stabilizer generator projectively (the ancilla-free equivalent of the q3/q4 ancilla checks), apply the table-driven decoder correction, decode, and compute the logical fidelity against the target pure state. The bare-qubit baseline receives the identical noise. Team: ${TEAM_NAMES.join(', ')} — Amrita Vishwa Vidyapeetham.`,
         },
       ]
     );
@@ -324,67 +273,6 @@ export default function SimulatorLab({ onNavigate }: { onNavigate?: (tab: string
     );
   };
 
-  const exportSurfaceReport = (res: SurfaceResult) => {
-    openPrintableReport(
-      { title: `Surface-Code Shot — d=${d} Rotated Lattice`, runKind: 'Simulator Lab · Single Shot' },
-      [
-        {
-          heading: 'Inputs (Experiment Configuration)',
-          kv: configRows([
-            ['Decoder', 'Minimum-weight perfect matching (exact subset DP, boundary-terminating pairs)'],
-            ['Model', 'Code-capacity Pauli frame'],
-          ]),
-        },
-        {
-          heading: 'Outputs (Results)',
-          cards: [
-            { label: 'Verdict', value: res.logicalError ? 'LOGICAL ERROR' : 'RECOVERED', tone: res.logicalError ? 'bad' : 'good' },
-            { label: 'Physical errors', value: String(res.xErrors.length + res.zErrors.length) },
-            { label: 'Syndrome defects', value: String(res.syndromeXDefects.length + res.syndromeZDefects.length) },
-            { label: 'Corrections', value: String(res.xCorrections.length + res.zCorrections.length) },
-          ],
-        },
-        {
-          heading: 'Error / Defect / Correction Ledger',
-          table: {
-            headers: ['Category', 'Qubit positions (row, col)'],
-            rows: [
-              ['X errors (bit flips)', res.xErrors.map(([r, c]) => `(${r},${c})`).join(' ') || 'none'],
-              ['Z errors (phase flips)', res.zErrors.map(([r, c]) => `(${r},${c})`).join(' ') || 'none'],
-              ['Z-stabilizer defects', res.syndromeZDefects.map(([r, c]) => `(${r},${c})`).join(' ') || 'none'],
-              ['X-stabilizer defects', res.syndromeXDefects.map(([r, c]) => `(${r},${c})`).join(' ') || 'none'],
-              ['X corrections', res.xCorrections.map(([r, c]) => `(${r},${c})`).join(' ') || 'none'],
-              ['Z corrections', res.zCorrections.map(([r, c]) => `(${r},${c})`).join(' ') || 'none'],
-            ],
-          },
-          note: res.detected ? 'Syndrome defects were flagged and matched by the MWPM decoder.' : 'Trivial syndrome — no errors to correct this shot.',
-        },
-        {
-          heading: 'Methodology',
-          text: `Independent X and Z components were sampled per data qubit at rate p. Z-type stabilizers flag X components and vice versa; the decoder pairs defects through the stabilizer graph with minimum total weight (boundary pairs allowed). A residual error anticommuting with a logical operator after correction constitutes a logical error. Team: ${TEAM_NAMES.join(', ')}.`,
-        },
-      ]
-    );
-  };
-
-  const exportSurfaceJSON = (res: SurfaceResult) => {
-    downloadJSON(`surface-shot-d${d}-${runId()}.json`, {
-      experiment: 'Surface-code single shot',
-      generatedAt: nowStamp(),
-      team: TEAM_NAMES,
-      inputs: Object.fromEntries(configRows()),
-      outputs: {
-        logicalError: res.logicalError,
-        detected: res.detected,
-        xErrors: res.xErrors,
-        zErrors: res.zErrors,
-        syndromeZDefects: res.syndromeZDefects,
-        syndromeXDefects: res.syndromeXDefects,
-        xCorrections: res.xCorrections,
-        zCorrections: res.zCorrections,
-      },
-    });
-  };
 
   return (
     <div className="flex flex-col gap-4">
@@ -395,19 +283,19 @@ export default function SimulatorLab({ onNavigate }: { onNavigate?: (tab: string
           { title: 'Read the Results tab', body: 'Green verdict = quantum information recovered. Fidelity near 100% means the state survived; the bare-qubit number shows what would happen without any protection.' },
           { title: 'Open the other two tabs', body: '“How it was computed” replays the pipeline with YOUR actual numbers; “What it means” interprets every value and suggests your next experiment.' },
         ]}
-        tip="New to quantum error correction? Keep Guide Mode ON (top bar) — every input then shows a one-line hint plus a ? button with the full story."
+        tip="Every input below shows a one-line hint plus a ? button with the full story — no prior quantum knowledge needed."
       />
       <div className="grid gap-6 lg:grid-cols-[360px_1fr]">
       {/* ------------------------------ Control panel */}
       <div className="flex flex-col gap-4">
-        <Card className="glass border-white/8">
+        <Card className="border-violet-500/20 bg-[#141126]">
           <CardHeader className="pb-3">
             <CardTitle className="text-base text-violet-300">Configuration</CardTitle>
           </CardHeader>
           <CardContent className="flex flex-col gap-5">
             <GuideField label="QEC Code" info={CODE_INFO} hint="One logical qubit protected by n physical ones. New here? Keep 3-Qubit Bit-Flip.">
               <Select value={codeId} onValueChange={switchCode}>
-                <SelectTrigger className="w-full border-violet-400/25 bg-white/[0.04]"><SelectValue /></SelectTrigger>
+                <SelectTrigger className="w-full border-violet-500/30 bg-[#1c1836]"><SelectValue /></SelectTrigger>
                 <SelectContent className="max-h-72">
                   {CODE_REGISTRY.map((c) => (
                     <SelectItem key={c.id} value={c.id}>
@@ -425,81 +313,32 @@ export default function SimulatorLab({ onNavigate }: { onNavigate?: (tab: string
 
             <GuideField label="Noise Model" info={NOISE_INFO} hint="How qubits get disturbed in this experiment. Bit-Flip (X) is the classic first example.">
               <Select value={noise} onValueChange={(v) => setNoise(v as NoiseModelId)}>
-                <SelectTrigger className="w-full border-violet-400/25 bg-white/[0.04]"><SelectValue /></SelectTrigger>
+                <SelectTrigger className="w-full border-violet-500/30 bg-[#1c1836]"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {compatNoise.map((id) => (
                     <SelectItem key={id} value={id}>{NOISE_LABELS[id]}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
-              {codeMeta.engine === 'surface' && (
-                <p className="mt-1.5 text-[11px] text-slate-500">Surface code uses the Pauli-frame engine: Pauli noise models only.</p>
-              )}
             </GuideField>
 
-            {noise !== 'thermal-relaxation' && noise !== 'coherent-rotation' && (
-              <GuideField
-                label="Error probability p"
-                info={P_INFO}
-                hint="Chance each qubit is hit per shot. 10% is the Phase-1 example."
-                right={<span className="font-mono text-violet-300">{p.toFixed(3)}</span>}
-              >
-                <Slider
-                  value={[Math.round(p * 500)]}
-                  min={0}
-                  max={500}
-                  step={1}
-                  onValueChange={(v) => setP(v[0] / 500)}
-                  className="text-violet-400"
-                />
-              </GuideField>
-            )}
+            <GuideField
+              label="Error probability p"
+              info={P_INFO}
+              hint="Chance each qubit is hit per shot. 10% is the Phase-1 example."
+              right={<span className="font-mono text-violet-300">{p.toFixed(3)}</span>}
+            >
+              <Slider
+                value={[Math.round(p * 500)]}
+                min={0}
+                max={500}
+                step={1}
+                onValueChange={(v) => setP(v[0] / 500)}
+                className="text-violet-400"
+              />
+            </GuideField>
 
-            {noise === 'coherent-rotation' && (
-              <GuideField
-                label="Error rotation angle"
-                info={{ what: 'A coherent error is a small systematic rotation applied to every qubit (e.g. a miscalibrated gate). It is deterministic — the SAME rotation every shot — which makes it harder to correct than random noise.', how: 'Drag the angle from 0° to 90°. Small angles (1–15°) are realistic for hardware; large angles show how coherent errors accumulate.', example: '10° rotation on |0⟩ tilts the state slightly toward the equator — the syndrome sees it as a weak error each round.' }}
-                hint="A miscalibrated gate = the same tilt every shot."
-                right={<span className="font-mono text-violet-300">{rotDeg.toFixed(1)}°</span>}
-              >
-                <Slider value={[rotDeg]} min={0} max={90} step={0.5} onValueChange={(v) => setRotDeg(v[0])} className="text-violet-400" />
-              </GuideField>
-            )}
-
-            {noise === 'thermal-relaxation' && (
-              <>
-                <GuideField
-                  label="T₁ relaxation time"
-                  info={{ what: 'T1 is the time over which a qubit loses its energy to the environment (|1⟩ decays toward |0⟩). Measured here in gate-time units: T1 = 5 means the qubit survives ~5 gates before significant decay.', how: 'Drag from 0.5 to 20. SMALL T1 = harsh hardware, LARGE T1 = good hardware.', example: 'T1 = 5 → about 18% amplitude damping per gate — noticeable but correctable.' }}
-                  hint="Energy-loss time. Small = harsh hardware."
-                  right={<span className="font-mono text-violet-300">{t1.toFixed(1)}</span>}
-                >
-                  <Slider value={[Math.round(t1 * 4)]} min={2} max={80} step={1} onValueChange={(v) => { const nv = v[0] / 4; setT1(nv); if (t2 > 2 * nv) setT2(2 * nv); }} className="text-violet-400" />
-                </GuideField>
-                <GuideField
-                  label="T₂ dephasing time"
-                  info={{ what: 'T2 is the time over which the qubit’s phase relationship (superposition) fades. Physically T2 can never exceed 2×T1 — the slider enforces this automatically.', how: 'Drag from 0.5 up to 2×T1. The gap T2 ≪ 2T1 means extra pure dephasing on top of energy loss.', example: 'T1 = 5, T2 = 5 → both decay and dephasing contribute each round.' }}
-                  hint="How long superposition survives (≤ 2×T1)."
-                  right={<span className="font-mono text-violet-300">{t2.toFixed(1)}</span>}
-                >
-                  <Slider value={[Math.round(t2 * 4)]} min={2} max={Math.round(2 * t1 * 4)} step={1} onValueChange={(v) => setT2(v[0] / 4)} className="text-violet-400" />
-                </GuideField>
-              </>
-            )}
-
-            {noise === 'crosstalk' && (
-              <GuideField
-                label="Crosstalk p_xtalk"
-                info={CROSSTALK_INFO}
-                hint="Extra neighbour-to-neighbour error on top of p."
-                right={<span className="font-mono text-violet-300">{pCrosstalk.toFixed(3)}</span>}
-              >
-                <Slider value={[Math.round(pCrosstalk * 200)]} min={0} max={200} step={1} onValueChange={(v) => setPCrosstalk(v[0] / 200)} />
-              </GuideField>
-            )}
-
-            {!isSurface && (
-              <GuideField label="Input State |ψ⟩" info={STATE_INFO} hint="Where your qubit starts on the Bloch sphere. Presets are the classic points.">
+            <GuideField label="Input State |ψ⟩" info={STATE_INFO} hint="Where your qubit starts on the Bloch sphere. Presets are the classic points.">
                 <div className="flex flex-wrap gap-1.5">
                   {STATE_PRESETS.map((s) => (
                     <Button
@@ -524,12 +363,11 @@ export default function SimulatorLab({ onNavigate }: { onNavigate?: (tab: string
                   </div>
                 )}
               </GuideField>
-            )}
 
             <GuideField
               label="Manual Error Injection"
               info={MANUAL_INFO}
-              hint={isSurface ? 'Click lattice cells to cycle I→X→Z→Y' : 'Click qubit buttons to cycle I→X→Z→Y'}
+              hint="Click qubit buttons to cycle I→X→Z→Y"
             >
               <div className="flex items-center justify-between rounded-lg border border-violet-500/20 px-3 py-2">
                 <span className="text-[11px] text-slate-400">{manualMode ? 'ON — your errors override random noise' : 'OFF — noise is sampled randomly'}</span>
@@ -537,17 +375,7 @@ export default function SimulatorLab({ onNavigate }: { onNavigate?: (tab: string
               </div>
             </GuideField>
 
-            {manualMode && isSurface && (
-              <SurfaceGrid
-                d={d}
-                cellStates={manualErrors}
-                onCellClick={toggleInject}
-                showStabs={false}
-                size={300}
-              />
-            )}
-
-            {manualMode && !isSurface && svCode && (
+            {manualMode && svCode && (
               <div className="rounded-lg border border-violet-500/20 p-3">
                 <div className="mb-2 text-[11px] text-slate-400">Toggle error type per qubit (I → X → Z → Y):</div>
                 <div className="flex flex-wrap gap-1.5">
@@ -589,12 +417,10 @@ export default function SimulatorLab({ onNavigate }: { onNavigate?: (tab: string
 
       {/* ------------------------------ Results panel */}
       <div className="flex flex-col gap-4">
-        {!trace && !surfaceResult && (
-          <Card className="glass border-dashed border-violet-400/25">
+        {!trace && (
+          <Card className="border-dashed border-violet-500/30 bg-[#100d1e]">
             <CardContent className="flex min-h-[420px] flex-col items-center justify-center gap-3 text-center">
-              <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-violet-500/10">
-                <Zap className="h-8 w-8 text-violet-400/70" />
-              </div>
+              <Zap className="h-10 w-10 text-violet-500/60" />
               <p className="max-w-sm text-sm text-slate-400">
                 Configure a QEC code and noise model, then press <span className="text-violet-300">Run Shot</span> to
                 step through the full error-correction pipeline — encoding, noise injection, syndrome extraction,
@@ -605,92 +431,19 @@ export default function SimulatorLab({ onNavigate }: { onNavigate?: (tab: string
         )}
 
         {trace && (
-          <>
-            <PipelineRail stage={playStage} onReplay={startPlayback} engine="statevector" />
-            <div className="rise-in">
-              <SVTraceView trace={trace} onReport={exportTraceReport} onJSON={exportTraceJSON} onCSV={exportTraceCSV} />
-            </div>
-          </>
-        )}
-        {surfaceResult && (
-          <>
-            <PipelineRail stage={playStage} onReplay={startPlayback} engine="surface" />
-            <div className="rise-in">
-              <SurfaceResultView res={surfaceResult} d={d} onReport={exportSurfaceReport} onJSON={exportSurfaceJSON} />
-            </div>
-          </>
+          <SVTraceView
+            trace={trace}
+            codeMeta={codeMeta}
+            pyBit={pyBit}
+            pyErr={pyErr}
+            setPyBit={setPyBit}
+            setPyErr={setPyErr}
+            onReport={exportTraceReport}
+            onJSON={exportTraceJSON}
+            onCSV={exportTraceCSV}
+          />
         )}
       </div>
-      </div>
-    </div>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/* PipelineRail — animated stage-by-stage playback of the 6 pipeline   */
-/* phases (v5). Lights up one stage at a time after each Run Shot,     */
-/* then rests in the "all complete" state. One-shot, never loops.      */
-/* ------------------------------------------------------------------ */
-
-const RAIL_STAGES = [
-  { label: 'Encode', icon: Cpu, hint: 'spread |ψ⟩ across physical qubits' },
-  { label: 'Noise', icon: Zap, hint: 'sample the selected error channel' },
-  { label: 'Syndrome', icon: ScanSearch, hint: 'stabilizer checks flag defects' },
-  { label: 'Correct', icon: Wand2, hint: 'decoder-applied recovery gates' },
-  { label: 'Decode', icon: CornerDownLeft, hint: 'un-encode back to 1 qubit' },
-  { label: 'Measure', icon: Target, hint: 'read out + score the fidelity' },
-];
-
-function PipelineRail({ stage, onReplay, engine }: {
-  stage: number | null;
-  onReplay: () => void;
-  engine: 'statevector' | 'surface';
-}) {
-  const playing = stage !== null && stage < RAIL_STAGES.length;
-  const done = stage !== null && stage >= RAIL_STAGES.length;
-  return (
-    <div className="glass relative overflow-hidden rounded-xl px-4 py-3">
-      {playing && (
-        <div aria-hidden className="absolute inset-x-0 top-0 h-[2px] overflow-hidden">
-          <div className="sweep-x h-full w-1/4 bg-gradient-to-r from-transparent via-cyan-300 to-transparent" />
-        </div>
-      )}
-      <div className="flex flex-wrap items-center gap-x-1 gap-y-2">
-        <span className="mr-2 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-          {engine === 'surface' ? 'MWPM pipeline' : 'Pipeline'} · {done ? 'complete' : playing ? 'running…' : 'replay'}
-        </span>
-        {RAIL_STAGES.map((s, i) => {
-          const Icon = s.icon;
-          const isDone = done || (stage !== null && i < stage);
-          const isActive = stage === i;
-          return (
-            <span key={s.label} className="flex items-center gap-1">
-              <span
-                title={s.hint}
-                className={`flex items-center gap-1.5 rounded-lg border px-2 py-1.5 text-[11px] font-medium transition-all duration-300 ${
-                  isActive
-                    ? 'stage-active border-cyan-300/70 bg-cyan-400/15 text-cyan-100'
-                    : isDone
-                      ? 'border-emerald-400/40 bg-emerald-400/10 text-emerald-300'
-                      : 'border-white/8 bg-white/[0.02] text-slate-500'
-                }`}
-              >
-                {isDone && !isActive ? <CircleCheck className="h-3 w-3" /> : <Icon className={`h-3 w-3 ${isActive ? '' : 'opacity-70'}`} />}
-                {s.label}
-              </span>
-              {i < RAIL_STAGES.length - 1 && (
-                <span className={`h-px w-3 transition-colors duration-300 ${isDone ? 'bg-emerald-400/50' : 'bg-slate-700'}`} />
-              )}
-            </span>
-          );
-        })}
-        <button
-          onClick={onReplay}
-          className="ml-auto flex items-center gap-1 rounded-md border border-violet-400/25 px-2 py-1 text-[10px] text-violet-300 transition-colors hover:bg-violet-500/15"
-          aria-label="Replay pipeline animation"
-        >
-          <RotateCcw className="h-3 w-3" /> Replay
-        </button>
       </div>
     </div>
   );
@@ -701,21 +454,26 @@ function PipelineRail({ stage, onReplay, engine }: {
 function Stat({ label, value, tone }: { label: string; value: string; tone?: 'good' | 'bad' | 'neutral' }) {
   const color = tone === 'good' ? 'text-emerald-400' : tone === 'bad' ? 'text-rose-400' : 'text-slate-200';
   return (
-    <div className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2">
+    <div className="rounded-lg border border-violet-500/15 bg-[#181430] px-3 py-2">
       <div className="text-[10px] uppercase tracking-wide text-slate-500">{label}</div>
       <div className={`font-mono text-lg font-semibold ${color}`}>{value}</div>
     </div>
   );
 }
 
-function SVTraceView({ trace, onReport, onJSON, onCSV }: {
+function SVTraceView({ trace, codeMeta, pyBit, pyErr, setPyBit, setPyErr, onReport, onJSON, onCSV }: {
   trace: ShotTrace;
+  codeMeta: { pythonType: 1 | 2; name: string };
+  pyBit: 0 | 1;
+  pyErr: 0 | 1 | 2;
+  setPyBit: (b: 0 | 1) => void;
+  setPyErr: (q: 0 | 1 | 2) => void;
   onReport: (t: ShotTrace) => void;
   onJSON: (t: ShotTrace) => void;
   onCSV: (t: ShotTrace) => void;
 }) {
   const steps = [
-    { n: 1, title: 'Encoding', detail: trace.projectionEncoding ? 'Stabilizer projection encoding onto the codespace' : 'Unitary encoding circuit applied', ok: true },
+    { n: 1, title: 'Encoding', detail: 'Unitary encoding circuit applied', ok: true },
     {
       n: 2, title: 'Noise',
       detail: trace.noiseEvents.length
@@ -737,16 +495,21 @@ function SVTraceView({ trace, onReport, onJSON, onCSV }: {
         : 'No correction needed',
       ok: true,
     },
-    { n: 5, title: 'Decoding', detail: trace.projectionEncoding ? 'Codespace readout of logical amplitudes' : 'Inverse encoding circuit applied', ok: true },
+    { n: 5, title: 'Decoding', detail: 'Inverse encoding circuit applied', ok: true },
     { n: 6, title: 'Measurement', detail: `Logical outcome: |${trace.measuredOutcome}⟩ — ${trace.detectionNote}`, ok: trace.recovered },
   ];
+
+  const pyCircuitTitle = codeMeta.pythonType === 1 ? 'bit_flip_qec(input_bit, error_qubit)' : 'phase_flip_qec(input_bit, error_qubit)';
+  const pyStatus = pythonQecStatus(NOISE_PYTYPE[trace.noiseId] ?? 1, codeMeta.pythonType);
+  const statusTone =
+    pyStatus.status === 'MATCHED' ? 'border-emerald-500/50 text-emerald-300' : pyStatus.status === 'DEPOLARIZING' ? 'border-cyan-500/50 text-cyan-300' : 'border-amber-500/50 text-amber-300';
 
   return (
     <ResultTabs
       results={
         <>
       {/* verdict */}
-      <Card className={`border ${trace.recovered ? 'border-emerald-400/40 bg-emerald-400/[0.05]' : 'border-amber-400/40 bg-amber-400/[0.05]'}`}>
+      <Card className={`border ${trace.recovered ? 'border-emerald-500/40' : 'border-amber-500/40'} bg-[#101a14]`}>
         <CardContent className="flex flex-wrap items-center justify-between gap-3 py-4">
           <div className="flex items-center gap-3">
             {trace.recovered ? <CircleCheck className="h-7 w-7 text-emerald-400" /> : <CircleX className="h-7 w-7 text-amber-400" />}
@@ -757,6 +520,9 @@ function SVTraceView({ trace, onReport, onJSON, onCSV }: {
               <div className="text-xs text-slate-400">
                 {trace.codeName} · {trace.noiseName} · p = {trace.p.toFixed(3)} · seed trace in {trace.elapsedMs} ms
               </div>
+              <span className={`mt-1.5 inline-block rounded-full border px-2.5 py-0.5 text-[10px] font-semibold tracking-wide ${statusTone}`}>
+                QEC STATUS: {pyStatus.status}
+              </span>
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -779,7 +545,7 @@ function SVTraceView({ trace, onReport, onJSON, onCSV }: {
 
       <div className="grid gap-4 lg:grid-cols-2">
         {/* encoding circuit */}
-        <Card className="glass border-white/8">
+        <Card className="border-violet-500/15 bg-[#141126]">
           <CardHeader className="pb-2"><CardTitle className="text-sm text-slate-200">Encoding Circuit & Error Injection</CardTitle></CardHeader>
           <CardContent>
             <CircuitDiagram
@@ -791,17 +557,42 @@ function SVTraceView({ trace, onReport, onJSON, onCSV }: {
                 ...trace.correction.z.map((q) => ({ qubit: q, kind: 'Z' as const })),
               ]}
             />
-            {trace.projectionEncoding && (
-              <p className="mt-2 text-[11px] text-slate-500">
-                <Info className="mr-1 inline h-3 w-3" />This code is encoded by sequentially projecting onto each
-                stabilizer&apos;s +1 eigenspace (mathematically exact); the syndrome table below shows the generators used.
-              </p>
-            )}
+          </CardContent>
+        </Card>
+
+        {/* exact Python circuit (all_with_noise_prob.py) */}
+        <Card className="border-violet-500/15 bg-[#141126] lg:col-span-2">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm text-slate-200">Exact Python Circuit — {pyCircuitTitle}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="mb-3 flex flex-wrap items-center gap-3">
+              <div className="flex items-center gap-1.5">
+                <span className="text-[11px] text-slate-400">input_bit</span>
+                {[0, 1].map((v) => (
+                  <Button key={v} size="sm" variant={pyBit === v ? 'default' : 'outline'} className={pyBit === v ? 'h-7 bg-violet-600 px-2.5 hover:bg-violet-500' : 'h-7 border-violet-500/30 px-2.5 text-slate-300'} onClick={() => setPyBit(v as 0 | 1)}>
+                    {v}
+                  </Button>
+                ))}
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-[11px] text-slate-400">error_qubit (noise attaches to its id gate)</span>
+                {[0, 1, 2].map((v) => (
+                  <Button key={v} size="sm" variant={pyErr === v ? 'default' : 'outline'} className={pyErr === v ? 'h-7 bg-amber-600 px-2.5 hover:bg-amber-500' : 'h-7 border-violet-500/30 px-2.5 text-slate-300'} onClick={() => setPyErr(v as 0 | 1 | 2)}>
+                    {v}
+                  </Button>
+                ))}
+              </div>
+              <span className="text-[11px] text-slate-500">
+                Same 5-qubit + 3-bit circuit the Python file builds; the engine below runs its ancilla-free equivalent.
+              </span>
+            </div>
+            <PythonCircuitCard pythonType={codeMeta.pythonType} inputBit={pyBit} errorQubit={pyErr} />
           </CardContent>
         </Card>
 
         {/* Bloch spheres */}
-        <Card className="glass border-white/8">
+        <Card className="border-violet-500/15 bg-[#141126]">
           <CardHeader className="pb-2"><CardTitle className="text-sm text-slate-200">Logical State Comparison</CardTitle></CardHeader>
           <CardContent>
             <div className="flex items-center justify-around">
@@ -814,7 +605,7 @@ function SVTraceView({ trace, onReport, onJSON, onCSV }: {
 
       <div className="grid gap-4 lg:grid-cols-2">
         {/* syndrome table */}
-        <Card className="glass border-white/8">
+        <Card className="border-violet-500/15 bg-[#141126]">
           <CardHeader className="pb-2"><CardTitle className="text-sm text-slate-200">Syndrome Table</CardTitle></CardHeader>
           <CardContent>
             <div className="grid max-h-56 grid-cols-2 gap-1.5 overflow-y-auto pr-1 sm:grid-cols-3">
@@ -830,13 +621,21 @@ function SVTraceView({ trace, onReport, onJSON, onCSV }: {
                 </div>
               ))}
             </div>
-            <Separator className="my-3 bg-white/10" />
+            <Separator className="my-3 bg-violet-500/15" />
             <div className="text-[11px] text-slate-500">{trace.detectionNote}</div>
+            <Separator className="my-3 bg-violet-500/15" />
+            <div className="text-[11px] font-semibold text-slate-300">Syndrome → error mapping (Python file)</div>
+            <div className="mt-1.5 grid grid-cols-2 gap-1.5 font-mono text-[11px] text-slate-400 sm:grid-cols-4">
+              <span className="rounded border border-slate-600/30 px-2 py-1">00 → No error</span>
+              <span className="rounded border border-rose-500/40 px-2 py-1 text-rose-300">01 → q0 error</span>
+              <span className="rounded border border-rose-500/40 px-2 py-1 text-rose-300">11 → q1 error</span>
+              <span className="rounded border border-rose-500/40 px-2 py-1 text-rose-300">10 → q2 error</span>
+            </div>
           </CardContent>
         </Card>
 
         {/* state inspector */}
-        <Card className="glass border-white/8">
+        <Card className="border-violet-500/15 bg-[#141126]">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm text-slate-200">
               Encoded State After Noise — |ψ⟩ = {trace.stateLabel}
@@ -868,7 +667,7 @@ function SVTraceView({ trace, onReport, onJSON, onCSV }: {
           </p>
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             {steps.map((s) => (
-              <Card key={s.n} className="glass border-white/8">
+              <Card key={s.n} className="border-cyan-500/15 bg-[#101823]">
                 <CardHeader className="pb-2 pt-4">
                   <CardTitle className="flex items-center gap-2 text-sm">
                     <span className="flex h-6 w-6 items-center justify-center rounded-full bg-cyan-600/25 font-mono text-xs text-cyan-300">{s.n}</span>
@@ -900,14 +699,14 @@ function SVTraceView({ trace, onReport, onJSON, onCSV }: {
             <MeaningCard tone="warn" title={trace.recovered ? 'Full recovery — what happened' : 'Partial recovery — why it happens'}>
               {trace.recovered
                 ? 'The decoder identified the exact error from the syndrome and cancelled it completely. The measured logical qubit equals your input state.'
-                : `The decoded state is close but imperfect. This typically happens with non-Pauli channels (amplitude damping, coherent rotations, thermal relaxation), which nudge the state continuously instead of flipping it — Pauli-type codes can only fully reverse Pauli-type errors. Engine note: ${trace.detectionNote}`}
+                : `The decoded state is close but imperfect. With Pauli channels this happens when SEVERAL errors hit the same block: the code's distance only guarantees correcting one, so the decoder picks the nearest single-error match and some damage remains. Engine note: ${trace.detectionNote}`}
             </MeaningCard>
             <MeaningCard tone="good" title="The syndrome — error clues without spying">
               Measuring the data qubits directly would destroy the superposition you are protecting. Stabilizer checks answer only “do these neighbours DISAGREE?” — enough to locate the error while the quantum information stays untouched. That indirectness is the central trick of quantum error correction.
             </MeaningCard>
           </div>
           <TryBox>
-            Raise the noise slider until the QEC fidelity drops toward the bare number — that is this code&apos;s pain point. Then switch the code to Shor [[9,1,3]] at the same noise and compare. For continuous protection, open the 3D Quantum Lab → Bloch Flight 4D and watch hundreds of live correction rounds.
+            Raise the noise slider until the QEC fidelity drops toward the bare number — that is this code&apos;s pain point. Then switch to the other QEC code at the same noise and compare (bit-flip code loves X noise, phase-flip code loves Z noise). For continuous protection, open the 3D Quantum Lab → Bloch Flight 4D and watch dozens of live correction rounds.
           </TryBox>
         </>
       }
@@ -926,170 +725,3 @@ function getN(codeId: string) {
   return c?.n ?? 1;
 }
 
-function SurfaceResultView({ res, d, onReport, onJSON }: {
-  res: SurfaceResult;
-  d: number;
-  onReport: (res: SurfaceResult) => void;
-  onJSON: (res: SurfaceResult) => void;
-}) {
-  return (
-    <ResultTabs
-      results={
-        <>
-      <Card className={`border ${res.logicalError ? 'border-rose-400/40 bg-rose-400/[0.05]' : 'border-emerald-400/40 bg-emerald-400/[0.05]'}`}>
-        <CardContent className="flex flex-wrap items-center justify-between gap-3 py-4">
-          <div className="flex items-center gap-3">
-            {res.logicalError ? <CircleX className="h-7 w-7 text-rose-400" /> : <CircleCheck className="h-7 w-7 text-emerald-400" />}
-            <div>
-              <div className="font-semibold text-slate-100">
-                {res.logicalError ? 'Logical error — residual error slipped past the decoder' : 'Recovery successful — logical qubit preserved'}
-              </div>
-              <div className="text-xs text-slate-400">
-                Rotated surface code d={d} · {res.xErrors.length + res.zErrors.length} physical error(s) · {res.detected ? 'syndrome detected' : 'trivial syndrome'}
-              </div>
-            </div>
-          </div>
-          <div className="flex gap-2">
-            <Stat label="Errors" value={String(res.xErrors.length + res.zErrors.length)} tone={res.xErrors.length + res.zErrors.length ? 'bad' : 'good'} />
-            <Stat label="Defects" value={String(res.syndromeXDefects.length + res.syndromeZDefects.length)} />
-            <Stat label="Verdict" value={res.logicalError ? 'FAIL' : 'OK'} tone={res.logicalError ? 'bad' : 'good'} />
-          </div>
-          <div className="flex w-full flex-wrap gap-2 border-t border-cyan-500/10 pt-3">
-            <Button size="sm" variant="outline" className="border-cyan-500/40 text-cyan-300 hover:bg-cyan-500/10" onClick={() => onReport(res)}>
-              <FileText className="mr-1 h-3.5 w-3.5" /> Export Report (PDF)
-            </Button>
-            <Button size="sm" variant="outline" className="border-violet-500/40 text-violet-300 hover:bg-violet-500/10" onClick={() => onJSON(res)}>
-              <Braces className="mr-1 h-3.5 w-3.5" /> JSON
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card className="glass border-white/8">
-        <CardHeader className="pb-2"><CardTitle className="text-sm text-slate-200">Lattice — Errors, Syndrome & Matching Correction</CardTitle></CardHeader>
-        <CardContent className="flex justify-center">
-          <SurfaceGrid
-            d={d}
-            xErrors={res.xErrors}
-            zErrors={res.zErrors}
-            xCorrections={res.xCorrections}
-            zCorrections={res.zCorrections}
-            syndromeXDefects={res.syndromeXDefects}
-            syndromeZDefects={res.syndromeZDefects}
-            size={400}
-          />
-        </CardContent>
-      </Card>
-        </>
-      }
-      how={
-        <div className="flex flex-col gap-4">
-          <p className="text-xs leading-relaxed text-slate-400">
-            The Pauli-frame pipeline for the d = {d} rotated lattice — every value below comes from this shot.
-          </p>
-          <StepList
-            steps={[
-              {
-                title: 'Error sampling — the lattice gets hit (or not)',
-                body: res.xErrors.length + res.zErrors.length
-                  ? <>This shot drew <span className="font-mono text-rose-300">{res.xErrors.length + res.zErrors.length} physical error(s)</span>: X (bit flips) at {res.xErrors.map(([r, c]) => `(${r},${c})`).join(' ') || '—'} · Z (phase flips) at {res.zErrors.map(([r, c]) => `(${r},${c})`).join(' ') || '—'}.</>
-                  : 'The sampling drew no errors this round — a perfectly clean shot.',
-              },
-              {
-                title: 'Syndrome — defects light up',
-                body: res.detected
-                  ? <>Z-type stabilizers flag X errors and vice versa. <span className="font-mono text-amber-300">{res.syndromeXDefects.length + res.syndromeZDefects.length} defect(s)</span> lit up at {[...res.syndromeXDefects, ...res.syndromeZDefects].map(([r, c]) => `(${r},${c})`).join(' ')}. Each defect means “an odd number of errors touches this plaquette”.</>
-                  : 'A trivial syndrome — every stabilizer came back +1, so there was nothing for the decoder to do.',
-              },
-              {
-                title: 'MWPM matching — pairing the clues',
-                body: <>The decoder pairs defects along <span className="text-cyan-300">minimum-weight paths</span> through the stabilizer graph (boundary pairs allowed), computed exactly with subset dynamic programming. The matching chains imply the corrections: {res.xCorrections.length + res.zCorrections.length ? <>X at {res.xCorrections.map(([r, c]) => `(${r},${c})`).join(' ') || '—'} · Z at {res.zCorrections.map(([r, c]) => `(${r},${c})`).join(' ') || '—'}</> : 'none needed'}.</>,
-              },
-              {
-                title: 'Logical check — the verdict',
-                body: res.logicalError
-                  ? 'Corrections were XOR-ed onto the residual error and what remained anticommuted with a logical operator — the decoder made the wrong call: LOGICAL ERROR.'
-                  : 'Corrections cancelled the error pattern into a harmless loop on the lattice — the logical qubit is intact: RECOVERED.',
-              },
-            ]}
-          />
-        </div>
-      }
-      meaning={
-        <>
-          <div className="grid gap-3 md:grid-cols-2">
-            <MeaningCard tone={res.logicalError ? 'warn' : 'good'} title="Verdict — what OK / FAIL actually means">
-              <p><span className="text-emerald-300">OK (recovered):</span> the corrections turned the error pattern into a loop that no logical operator can see — the encoded qubit is mathematically intact.</p>
-              <p className="mt-2"><span className="text-rose-300">FAIL (logical error):</span> a residual error slipped past the decoder and anticommutes with a logical operator — at the physical level this corrupts the stored information. One failure does not mean the code is bad; statistics over many shots (Performance Lab) tell the real story.</p>
-            </MeaningCard>
-            <MeaningCard tone="info" title="Defects — the only visible signal">
-              Data qubits are never measured during correction. Instead, each stabilizer plaquette reports whether an odd number of errors touches it. A single defect cannot be located uniquely — only PAIRS of defects (or a defect with the boundary) identify the error chain, which is exactly what the matching decoder computes.
-            </MeaningCard>
-            <MeaningCard tone="violet" title="Why bigger d wins — until the threshold">
-              Distance d means the decoder must be fooled by at least ⌊d/2⌋ errors conspiring along one logical operator. Lower physical error rates therefore improve failure EXPONENTIALLY in d — but only while p stays below the ~10% threshold. Above it, adding qubits makes things worse.
-            </MeaningCard>
-            <MeaningCard tone="good" title="Reading the lattice picture">
-              Red markers = X errors, amber = Z errors, glowing stars = syndrome defects, and the drawn chains = the decoder&apos;s matching corrections. When a chain connects two defects (or a defect and the boundary), the pair cancellation is what makes the error disappear.
-            </MeaningCard>
-          </div>
-          <TryBox>
-            Go to the Performance Lab and press “Sweep p” with a surface code: the d = 3/5/7 curves crossing near ~10% noise is the famous surface-code threshold, reproduced live by this engine. Then return here, turn on Manual Injection, and place two errors along one logical row — you can build a decoder failure by hand.
-          </TryBox>
-        </>
-      }
-    />
-  );
-}
-
-/** deterministic surface shot with injected errors (p=0 + forced Paulis) */
-function runWithInjection(d: number, forced: [number, number, CellState][]): SurfaceResult {
-  const n2 = d * d;
-  const xErr = new Array(n2).fill(false);
-  const zErr = new Array(n2).fill(false);
-  for (const [r, c, st] of forced) {
-    if (st === 1 || st === 3) xErr[r * d + c] = true;
-    if (st === 2 || st === 3) zErr[r * d + c] = true;
-  }
-  return decodeAndReport(d, xErr, zErr);
-}
-
-import { getSurfaceLayout, buildMatchingGraph, matchDefects, stabCenter } from '@/lib/qec/surface';
-
-function decodeAndReport(d: number, xErr: boolean[], zErr: boolean[]): SurfaceResult {
-  const layout = getSurfaceLayout(d);
-  const n2 = d * d;
-  const graphZ = buildMatchingGraph(layout, 'Z');
-  const graphX = buildMatchingGraph(layout, 'X');
-  const decode = (syndrome: number[], stabs: typeof layout.stabsZ, graph: typeof graphZ): [number, number][] => {
-    const defects = syndrome.map((s, i) => (s === 1 ? i : -1)).filter((i) => i >= 0);
-    if (defects.length === 0) return [];
-    const { pairs, toBoundary } = matchDefects(graph, defects);
-    const corrected = new Array(n2).fill(false);
-    for (const [i, j] of pairs) for (const q of graph.path[i][j]) corrected[q] = !corrected[q];
-    for (const i of toBoundary) for (const q of graph.pathB[i]) corrected[q] = !corrected[q];
-    const out: [number, number][] = [];
-    for (let q = 0; q < n2; q++) if (corrected[q]) out.push([Math.floor(q / d), q % d]);
-    return out;
-  };
-  const syndromeZ = layout.stabsZ.map((st) => st.qubits.reduce((acc, [r, c]) => acc + (xErr[r * d + c] ? 1 : 0), 0) % 2);
-  const syndromeX = layout.stabsX.map((st) => st.qubits.reduce((acc, [r, c]) => acc + (zErr[r * d + c] ? 1 : 0), 0) % 2);
-  const xCorrections = decode(syndromeZ, layout.stabsZ, graphZ);
-  const zCorrections = decode(syndromeX, layout.stabsX, graphX);
-  const resX = [...xErr];
-  const resZ = [...zErr];
-  for (const [r, c] of xCorrections) resX[r * d + c] = !resX[r * d + c];
-  for (const [r, c] of zCorrections) resZ[r * d + c] = !resZ[r * d + c];
-  const xOnRow0 = layout.logicalZ.filter(([r, c]) => resX[r * d + c]).length;
-  const zOnCol0 = layout.logicalX.filter(([r, c]) => resZ[r * d + c]).length;
-  const toPos = (i: number): [number, number] => [Math.floor(i / d), i % d];
-  return {
-    logicalError: xOnRow0 % 2 === 1 || zOnCol0 % 2 === 1,
-    xErrors: xErr.map((v, i) => (v ? toPos(i) : null)).filter(Boolean) as [number, number][],
-    zErrors: zErr.map((v, i) => (v ? toPos(i) : null)).filter(Boolean) as [number, number][],
-    syndromeZDefects: syndromeZ.map((s, i) => (s ? stabCenter(layout, layout.stabsZ[i]) : null)).filter(Boolean) as [number, number][],
-    syndromeXDefects: syndromeX.map((s, i) => (s ? stabCenter(layout, layout.stabsX[i]) : null)).filter(Boolean) as [number, number][],
-    xCorrections,
-    zCorrections,
-    detected: syndromeX.some((s) => s === 1) || syndromeZ.some((s) => s === 1),
-  };
-}

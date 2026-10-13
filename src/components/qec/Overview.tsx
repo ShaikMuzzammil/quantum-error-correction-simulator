@@ -24,39 +24,38 @@ export default function Overview({ onNavigate }: { onNavigate: (tab: string) => 
   return (
     <div className="flex flex-col gap-8">
       {/* Hero */}
-      <div className="glass-deep relative overflow-hidden rounded-2xl p-8 md:p-10">
-        <div className="pointer-events-none absolute -right-16 -top-16 h-72 w-72 rounded-full bg-violet-600/20 blur-3xl" />
-        <div className="pointer-events-none absolute -bottom-24 -left-10 h-72 w-72 rounded-full bg-cyan-500/12 blur-3xl" />
-        <div className="relative rise-in">
-          <Badge className="mb-4 border border-violet-400/30 bg-violet-500/15 text-violet-200 hover:bg-violet-500/15">Phase 2 Prototype · Interactive Simulator</Badge>
-          <h1 className="max-w-3xl text-3xl font-bold leading-tight md:text-[2.6rem] md:leading-[1.15]">
-            <span className="text-gradient-hero">Quantum Error Correction,</span>
-            <br />
-            <span className="text-slate-50">running live in your browser</span>
+      <div className="relative overflow-hidden rounded-2xl border border-violet-500/25 bg-gradient-to-br from-[#191233] via-[#120e24] to-[#0c1120] p-8 md:p-10">
+        <div className="pointer-events-none absolute -right-16 -top-16 h-64 w-64 rounded-full bg-violet-600/15 blur-3xl" />
+        <div className="pointer-events-none absolute -bottom-24 -left-10 h-64 w-64 rounded-full bg-cyan-500/10 blur-3xl" />
+        <div className="relative">
+          <Badge className="mb-4 bg-violet-600/25 text-violet-200 hover:bg-violet-600/25">Phase 2 Prototype · Interactive Simulator · Amrita Vishwa Vidyapeetham</Badge>
+          <h1 className="max-w-3xl text-3xl font-bold leading-tight text-slate-50 md:text-4xl">
+            An Interactive <span className="bg-gradient-to-r from-violet-400 to-cyan-300 bg-clip-text text-transparent">Quantum Error Correction</span> Simulator
           </h1>
-          <p className="mt-3 max-w-2xl text-sm leading-relaxed text-slate-400 md:text-[15px]">
+          <p className="mt-3 max-w-2xl text-sm leading-relaxed text-slate-400 md:text-base">
             Configure a code, pick a noise model, and watch error correction work — every objective from our
-            Phase-1 proposal running live. Press Run once: each simulation plays through and stops.
+            Phase-1 proposal running live in your browser. Press Run once: each simulation plays through and stops.
           </p>
           <div className="mt-6 flex flex-wrap gap-2">
             {[
-              '9 QEC codes', '8 noise models', 'MWPM decoder', 'Monte Carlo engine',
-              'Live 3D/4D visuals', 'PDF reports', '10⁵-shot scale', 'Plain-language guides',
+              '2 QEC codes (bit-flip · phase-flip)', '3 noise channels (X · Z · depolarizing)',
+              'Exact Python-file circuits', 'Monte Carlo engine', 'One-shot 3D/4D runs',
+              'PDF reports with circuit diagrams', '25,000-shot runs', 'Always-on input guides',
             ].map((f) => (
-              <span key={f} className="rounded-full border border-cyan-400/20 bg-cyan-400/[0.07] px-3 py-1 text-xs text-cyan-300">{f}</span>
+              <span key={f} className="rounded-full border border-cyan-500/25 bg-cyan-500/5 px-3 py-1 text-xs text-cyan-300">{f}</span>
             ))}
           </div>
           <div className="mt-6 flex flex-wrap gap-3">
-            <Button onClick={() => onNavigate('simulator')} className="btn-shimmer border-0 text-white shadow-[0_8px_28px_-8px_rgba(124,58,237,0.7)]">
+            <Button onClick={() => onNavigate('simulator')} className="bg-violet-600 hover:bg-violet-500">
               <Atom className="mr-1.5 h-4 w-4" /> Open Simulator
             </Button>
-            <Button onClick={() => onNavigate('lab3d')} className="bg-gradient-to-r from-cyan-600 to-violet-600 hover:from-cyan-500 hover:to-violet-500 shadow-[0_8px_28px_-10px_rgba(6,182,212,0.6)]">
+            <Button onClick={() => onNavigate('lab3d')} className="bg-gradient-to-r from-cyan-600 to-violet-600 hover:from-cyan-500 hover:to-violet-500">
               <Orbit className="mr-1.5 h-4 w-4" /> 3D Quantum Lab
             </Button>
-            <Button onClick={() => onNavigate('performance')} variant="outline" className="border-cyan-400/30 bg-cyan-400/5 text-cyan-300 hover:bg-cyan-400/15">
+            <Button onClick={() => onNavigate('performance')} variant="outline" className="border-cyan-500/40 text-cyan-300 hover:bg-cyan-500/10">
               <Activity className="mr-1.5 h-4 w-4" /> Performance Lab
             </Button>
-            <Button onClick={() => onNavigate('learn')} variant="outline" className="border-amber-400/30 bg-amber-400/5 text-amber-300 hover:bg-amber-400/15">
+            <Button onClick={() => onNavigate('learn')} variant="outline" className="border-amber-400/40 text-amber-300 hover:bg-amber-500/10">
               <GraduationCap className="mr-1.5 h-4 w-4" /> Learn the basics
             </Button>
           </div>
@@ -71,38 +70,33 @@ export default function Overview({ onNavigate }: { onNavigate: (tab: string) => 
             {
               icon: SlidersHorizontal,
               title: '1 · Multi-model noise simulation',
-              body: 'Eight noise channels — bit-flip, phase-flip, depolarizing, amplitude damping, phase damping, thermal relaxation (T1/T2), coherent over-rotation and crosstalk — each with configurable probabilities, applied through exact quantum-trajectory sampling.',
+              body: 'The three noise channels of all_with_noise_prob.py — bit-flip (X), phase-flip (Z) and depolarizing — each with a configurable probability, applied through exact quantum-trajectory sampling on every shot.',
               tab: 'noise',
               cta: 'Browse noise models',
-              tint: 'from-violet-500/20 to-violet-500/0 text-violet-300',
             },
             {
               icon: Gauge,
               title: '2 · Before/after comparison',
-              body: 'Every experiment evaluates the SAME noise on a bare qubit and on the encoded logical qubit: fidelities, error rates, improvement factors, detection statistics, plus full probability sweeps that expose the surface-code threshold.',
+              body: 'Every experiment evaluates the SAME noise on a bare qubit and on the encoded logical qubit: fidelities, error rates, improvement factors, detection statistics, plus full probability sweeps that expose each code\u2019s pseudo-threshold.',
               tab: 'performance',
               cta: 'Run performance analysis',
-              tint: 'from-cyan-500/20 to-cyan-500/0 text-cyan-300',
             },
             {
               icon: ShieldCheck,
               title: '3 · Configurable QEC experimentation',
-              body: 'Nine QEC configurations ([[3,1,3]] bit/phase-flip, 5-qubit repetition, Shor [[9,1,3]], Steane [[7,1,3]], perfect [[5,1,3]], and rotated surface codes d=3/5/7) combinable with any compatible noise model, state, seed and error-injection scenario.',
+              body: 'Both QEC codes of the Python reference — 3-Qubit Bit-Flip [[3,1,3]] and 3-Qubit Phase-Flip [[3,1,3]] — combinable with any compatible noise channel, plus input-state presets, manual error injection on any qubit and a seeded RNG for reproducibility.',
               tab: 'simulator',
               cta: 'Configure an experiment',
-              tint: 'from-fuchsia-500/20 to-fuchsia-500/0 text-fuchsia-300',
             },
           ].map((o) => (
-            <Card key={o.title} className="glass glass-hover border-white/8 hover:border-violet-400/40">
+            <Card key={o.title} className="border-violet-500/20 bg-[#141126] transition-colors hover:border-violet-500/40">
               <CardContent className="flex flex-col gap-3 p-5">
-                <div className={`flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-b ${o.tint}`}>{
-                  // gradient tint wrapper keeps icon colour per-card
-                }
-                  <o.icon className={`h-5 w-5 ${o.tint.split(' ').pop()}`} />
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-violet-600/20">
+                  <o.icon className="h-5 w-5 text-violet-300" />
                 </div>
                 <h3 className="text-sm font-semibold text-slate-100">{o.title}</h3>
                 <p className="text-xs leading-relaxed text-slate-400">{o.body}</p>
-                <Button size="sm" variant="ghost" className="mt-auto justify-start px-2 text-cyan-400 hover:bg-cyan-400/10" onClick={() => onNavigate(o.tab)}>
+                <Button size="sm" variant="ghost" className="mt-auto justify-start px-2 text-cyan-400 hover:bg-cyan-500/10" onClick={() => onNavigate(o.tab)}>
                   {o.cta} →
                 </Button>
               </CardContent>
@@ -116,16 +110,12 @@ export default function Overview({ onNavigate }: { onNavigate: (tab: string) => 
       {/* Pipeline architecture */}
       <div>
         <h2 className="mb-4 text-xl font-semibold text-slate-100">Simulation Pipeline Architecture</h2>
-        <Card className="glass border-white/8">
+        <Card className="border-violet-500/20 bg-[#141126]">
           <CardContent className="p-6">
-            <div className="flex flex-wrap items-center justify-center gap-1.5 text-xs md:gap-2">
+            <div className="flex flex-wrap items-center justify-center gap-2 text-xs md:gap-3">
               {['User Input', 'Encoding', 'Noise Model', 'Syndrome', 'Correction', 'Decoding', 'Measurement', 'Performance'].map((s, i, arr) => (
-                <span key={s} className="flex items-center gap-1.5 md:gap-2">
-                  <span className={`rounded-lg border px-2.5 py-2 font-medium md:px-3 ${
-                    i === 0 ? 'border-cyan-400/35 bg-cyan-400/10 text-cyan-300'
-                      : i === arr.length - 1 ? 'border-emerald-400/35 bg-emerald-400/10 text-emerald-300'
-                        : 'border-violet-400/30 bg-violet-400/10 text-violet-200'
-                  }`}>
+                <span key={s} className="flex items-center gap-2 md:gap-3">
+                  <span className={`rounded-lg border px-3 py-2 font-medium ${i === 0 ? 'border-cyan-500/40 bg-cyan-500/10 text-cyan-300' : i === arr.length - 1 ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300' : 'border-violet-500/40 bg-violet-500/10 text-violet-300'}`}>
                     {s}
                   </span>
                   {i < arr.length - 1 && <ChevronRight className="h-3.5 w-3.5 text-slate-600" />}
@@ -133,10 +123,10 @@ export default function Overview({ onNavigate }: { onNavigate: (tab: string) => 
               ))}
             </div>
             <p className="mx-auto mt-4 max-w-3xl text-center text-xs leading-relaxed text-slate-500">
-              Every run follows the exact pipeline presented in Phase 1. The engine is a from-scratch quantum
-              simulator: a full state-vector backend (up to 9 qubits with real amplitudes, Kraus trajectories and
-              projective stabilizer measurements) plus a Pauli-frame stabilizer backend with an exact
-              minimum-weight perfect-matching decoder for surface codes up to distance 7.
+              Every run follows the exact pipeline of all_with_noise_prob.py. The engine is a from-scratch quantum
+              simulator: a full state-vector backend with real complex amplitudes, quantum-trajectory noise sampling
+              and projective stabilizer measurements — the ancilla-free equivalent of the Python circuit&apos;s q3/q4
+              syndrome ancillas and conditional corrections.
             </p>
           </CardContent>
         </Card>
@@ -145,9 +135,9 @@ export default function Overview({ onNavigate }: { onNavigate: (tab: string) => 
       {/* Team */}
       <div className="grid gap-4 md:grid-cols-3">
         {TEAM.map((t) => (
-          <Card key={t.id} className="glass border-white/8">
+          <Card key={t.id} className="border-violet-500/15 bg-[#141126]">
             <CardContent className="flex items-center gap-3 p-4">
-              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-violet-600 to-cyan-500 font-semibold text-white shadow-[0_0_18px_rgba(139,92,246,0.4)]">
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-violet-600 to-cyan-500 font-semibold text-white">
                 {t.name.split(' ').map((w) => w[0]).slice(0, 2).join('')}
               </div>
               <div>
@@ -305,15 +295,15 @@ function WorkedExample() {
           {auto ? '⏸ Pause tour' : '▶ Auto-play tour'}
         </Button>
       </div>
-      <Card className="glass-deep border-violet-400/20">
+      <Card className="border-violet-500/25 bg-[#141126]">
         <CardContent className="p-6">
           <div className="mb-4 flex flex-wrap gap-1.5">
             {steps.map((s, i) => (
               <button
                 key={s.title}
                 onClick={() => { setStepIdx(i); setAuto(false); }}
-                className={`rounded-md px-2.5 py-1 text-[11px] font-medium transition-all ${
-                  i === stepIdx ? 'bg-gradient-to-b from-violet-500 to-violet-600 text-white shadow-[0_0_14px_rgba(139,92,246,0.45)]' : i < stepIdx ? 'bg-violet-500/20 text-violet-300' : 'bg-white/[0.04] text-slate-500 hover:bg-white/[0.08]'
+                className={`rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                  i === stepIdx ? 'bg-violet-600 text-white' : i < stepIdx ? 'bg-violet-600/20 text-violet-300' : 'bg-slate-800/60 text-slate-500 hover:bg-slate-700/60'
                 }`}
               >
                 {i + 1}. {s.title}
@@ -331,7 +321,7 @@ function WorkedExample() {
               <div className="text-sm leading-relaxed text-slate-300">{step.body}</div>
             </div>
 
-            <div className="rounded-xl border border-cyan-400/20 bg-cyan-400/[0.04] p-4">
+            <div className="rounded-xl border border-cyan-500/20 bg-[#0d1520] p-4">
               <div className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-cyan-400">Qubit Register</div>
               <div className="flex justify-center gap-2">
                 {['|0⟩→', '|0⟩→', '|0⟩'].map((_, q) => {

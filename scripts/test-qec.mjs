@@ -1,299 +1,390 @@
 /**
- * Dev verification tests for the QEC engine.
- * Run: bun run scripts/test-qec.mjs (via bun with TS support)
+ * Verification suite for the focused QEC engine.
+ *
+ * Scope = exactly all_with_noise_prob.py: 2 codes (bit-flip, phase-flip) ×
+ * 3 noise channels (X, Z, depolarizing). Run: bun scripts/test-qec.mjs
  */
-import {
-  StateVector, makeRng, GATES, fidelityFromRho,
-} from '../src/lib/qec/engine.ts';
-import {
-  SV_CODES, CODE_3BITFLIP, CODE_3PHASEFLIP, CODE_SHOR9, CODE_STEANE7, CODE_5QUBIT,
-  runShot,
-} from '../src/lib/qec/codes.ts';
-import { bareQubitFidelity } from '../src/lib/qec/noise.ts';
-import { mcRun } from '../src/lib/qec/pipeline.ts';
-import {
-  buildSurfaceLayout, runSurfaceShot, getSurfaceLayout, stabCenter, buildMatchingGraph, matchDefects,
-} from '../src/lib/qec/surface.ts';
+import { makeRng, StateVector, GATES, fidelityFromRho, blochFromRho } from '../src/lib/qec/engine.ts';
+import { CODE_3BITFLIP, CODE_3PHASEFLIP, SV_CODES, getSVCode, buildCorrectionTable, lookupCorrection, runShot, syndromeOfError, buildPythonCircuit } from '../src/lib/qec/codes.ts';
+import { NOISE_MODELS, applyNoiseLayer, noiseParams, bareQubitFidelity } from '../src/lib/qec/noise.ts';
+import { runTrace, mcRun, sweepSV, prepareEncodedState, runLiveRound, runBareRound, readLogicalBloch } from '../src/lib/qec/pipeline.ts';
 
-let pass = 0, fail = 0;
-function check(name, cond, extra = '') {
-  if (cond) { pass++; console.log(`  ✓ ${name}`); }
-  else { fail++; console.log(`  ✗ FAIL: ${name} ${extra}`); }
+let passed = 0;
+let failed = 0;
+const failures = [];
+
+function check(name, cond) {
+  if (cond) {
+    passed++;
+  } else {
+    failed++;
+    failures.push(name);
+  }
 }
 
-// ---------------------------------------------------------------------------
-console.log('\n=== 1. Basic gates ===');
+function approx(a, b, tol = 0.02) {
+  return Math.abs(a - b) < tol;
+}
+
+/* ------------------------------------------------------------------ */
+/* 1. Engine core                                                      */
+/* ------------------------------------------------------------------ */
 {
   const sv = new StateVector(1);
-  sv.prepareQubit0(0, 0); // |0>
+  check('engine: |0> init', sv.probOne(0) === 0);
   sv.applyGate1(0, GATES.X);
+  check('engine: X flips |0> to |1>', approx(sv.probOne(0), 1, 1e-12));
+  sv.applyGate1(0, GATES.H);
+  check('engine: H on |1> → 50/50', approx(sv.probOne(0), 0.5, 1e-12));
   const rho = sv.partialTraceQ0();
-  check('X|0> = |1>', Math.abs(rho[6] - 1) < 1e-12, `rho11=${rho[6]}`);
+  check('engine: rho of |+> is maximally mixed', approx(rho[0], 0.5, 1e-12) && approx(rho[6], 0.5, 1e-12));
 
   const sv2 = new StateVector(1);
-  sv2.prepareQubit0(0, 0);
-  sv2.applyGate1(0, GATES.H);
-  const rho2 = sv2.partialTraceQ0();
-  check('H|0> = |+>', Math.abs(rho2[0] - 0.5) < 1e-12 && Math.abs(rho2[2] - 0.5) < 1e-12);
+  sv2.prepareQubit0(Math.PI / 3, Math.PI / 5);
+  check('engine: fidelity of state with itself = 1', approx(fidelityFromRho(sv2.partialTraceQ0(), Math.PI / 3, Math.PI / 5), 1, 1e-12));
+  const bl = blochFromRho(sv2.partialTraceQ0());
+  check('engine: Bloch vector length 1 for pure state', approx(Math.hypot(bl.x, bl.y, bl.z), 1, 1e-9));
 
-  // CNOT entangles
+  // CNOT correctness on 2 qubits
   const sv3 = new StateVector(2);
-  sv3.prepareQubit0(0, 0);
-  sv3.applyGate1(0, GATES.H);
+  sv3.applyGate1(0, GATES.X);
   sv3.applyCNOT(0, 1);
-  const amps = sv3.topAmplitudes(0.01, 8);
-  check('Bell state', amps.length === 2 && Math.abs(amps[0].prob - 0.5) < 1e-12, JSON.stringify(amps));
-
-  // measurePauli: Z on |0> should give +1 deterministically
-  const sv4 = new StateVector(1);
-  sv4.prepareQubit0(0, 0);
-  const r = sv4.measurePauli(['Z'], makeRng(1));
-  check('measure Z on |0> = +1', r.outcome === 1);
-
-  const sv5 = new StateVector(1);
-  sv5.prepareQubit0(0, 0);
-  sv5.applyGate1(0, GATES.X);
-  const r2 = sv5.measurePauli(['Z'], makeRng(1));
-  check('measure Z on |1> = -1', r2.outcome === -1);
+  check('engine: CNOT|10> = |11>', approx(sv3.probOne(0), 1) && approx(sv3.probOne(1), 1));
 }
 
-// ---------------------------------------------------------------------------
-console.log('\n=== 2. Encoding circuits put states in codespace ===');
-for (const code of SV_CODES) {
-  if (code.projectionEncoding) continue; // projection encoding trivially in codespace
-  const sv = new StateVector(code.n);
-  sv.prepareQubit0(Math.PI / 3, Math.PI / 5); // arbitrary state
-  for (const op of code.encoding) sv.applyGateOp(op.gate, op.qubits, op.param);
-  let ok = true, badStab = '';
-  for (const st of code.stabilizers) {
-    const s = sv.expectPauli(st.paulis);
-    if (Math.abs(s - 1) > 1e-9) { ok = false; badStab = `${st.label}: <S>=${s.toFixed(6)}`; }
-  }
-  check(`${code.short}: all stabilizers +1 after encoding`, ok, badStab);
+/* ------------------------------------------------------------------ */
+/* 2. Registry & codes                                                 */
+/* ------------------------------------------------------------------ */
+{
+  check('registry: exactly 2 codes', SV_CODES.length === 2);
+  check('registry: bit-flip code present', !!getSVCode('code-3bitflip'));
+  check('registry: phase-flip code present', !!getSVCode('code-3phaseflip'));
+  check('registry: bit-flip pythonType=1', CODE_3BITFLIP.pythonType === 1);
+  check('registry: phase-flip pythonType=2', CODE_3PHASEFLIP.pythonType === 2);
+  check('registry: both [[3,1,3]]', CODE_3BITFLIP.n === 3 && CODE_3BITFLIP.k === 1 && CODE_3BITFLIP.d === 3 && CODE_3PHASEFLIP.n === 3);
 
-  // decode(encode(psi)) = psi
-  for (const op of code.decoding) sv.applyGateOp(op.gate, op.qubits, op.param);
-  const rho = sv.partialTraceQ0();
-  const f = fidelityFromRho(rho, Math.PI / 3, Math.PI / 5);
-  check(`${code.short}: encode->decode roundtrip fidelity = 1`, f > 1 - 1e-9, `F=${f}`);
+  check('noise: exactly 3 models', NOISE_MODELS.length === 3);
+  check('noise: ids = bitflip/phaseflip/depolarizing', NOISE_MODELS.map((m) => m.id).join(',') === 'bitflip,phaseflip,depolarizing');
+  check('noise: pythonTypes 1/2/3', NOISE_MODELS.map((m) => m.pythonType).join(',') === '1,2,3');
+
+  // correction tables match the Python file's mapping
+  const bf = buildCorrectionTable(CODE_3BITFLIP);
+  // engine syndrome order = [Z0Z1, Z1Z2]; the Python file prints [q4, q3] = [Z1Z2, Z0Z1]
+  // so engine '10' == python display '01' — same physics, different string order.
+  check('bit-flip table: engine 10 (py 01) → X(q0)', bf.get('10')?.x[0] === 0 && (bf.get('10')?.z.length ?? 1) === 0);
+  check('bit-flip table: engine 11 (py 11) → X(q1)', bf.get('11')?.x[0] === 1);
+  check('bit-flip table: engine 01 (py 10) → X(q2)', bf.get('01')?.x[0] === 2);
+  check('bit-flip table: Z errors invisible (no Z entries)', ![...bf.values()].some((c) => c.z.length > 0));
+  const pf = buildCorrectionTable(CODE_3PHASEFLIP);
+  check('phase-flip table: engine 10 (py 01) → Z(q0)', pf.get('10')?.z[0] === 0);
+  check('phase-flip table: engine 11 (py 11) → Z(q1)', pf.get('11')?.z[0] === 1);
+  check('phase-flip table: engine 01 (py 10) → Z(q2)', pf.get('01')?.z[0] === 2);
+
+  // syndrome of errors
+  // engine order [Z0Z1, Z1Z2]: X@q0 trips Z0Z1 only → '10'
+  check('syndrome: X@q0 on bit-flip code = engine 10 (py 01)', syndromeOfError(CODE_3BITFLIP, 0, 'X').join('') === '10');
+  check('syndrome: X@q1 on bit-flip code = 11', syndromeOfError(CODE_3BITFLIP, 1, 'X').join('') === '11');
+  check('syndrome: X@q2 on bit-flip code = engine 01 (py 10)', syndromeOfError(CODE_3BITFLIP, 2, 'X').join('') === '01');
+  check('syndrome: Z@q0 on bit-flip code = 00 (invisible)', syndromeOfError(CODE_3BITFLIP, 0, 'Z').join('') === '00');
+  check('syndrome: Z@q0 on phase-flip code = engine 10 (py 01)', syndromeOfError(CODE_3PHASEFLIP, 0, 'Z').join('') === '10');
 }
 
-// ---------------------------------------------------------------------------
-console.log('\n=== 3. Single-error correction (fidelity = 1 for correctable errors) ===');
-// For each code: inject each single-qubit Pauli error, run syndrome+correction+decode
-for (const code of SV_CODES) {
-  const theta = Math.PI / 3, phi = Math.PI / 5;
-  for (let q = 0; q < code.n; q++) {
-    for (const [ex, ez, ename] of [[true, false, 'X'], [true, true, 'Y'], [false, true, 'Z']]) {
-      const res = runShot(code, {
-        theta, phi,
-        noise: 'depolarizing', params: { p: 0 },
-        forcedErrors: [{ qubit: q, x: ex, z: ez }],
-      }, makeRng(42));
-      // which errors SHOULD be corrected: codes with d=3 correcting arbitrary single errors
-      const arbitrary = ['code-shor9', 'code-steane7', 'code-5qubit'].includes(code.id);
-      const bfCode = code.id === 'code-3bitflip' || code.id === 'code-rep5';
-      const pfCode = code.id === 'code-3phaseflip';
-      let shouldCorrect;
-      if (arbitrary) shouldCorrect = true;
-      else if (bfCode) shouldCorrect = ename === 'X';
-      else if (pfCode) shouldCorrect = ename === 'Z';
-      if (shouldCorrect) {
-        if (!(res.fidelity > 1 - 1e-9)) {
-          fail++;
-          console.log(`  ✗ FAIL: ${code.short} ${ename} on q${q}: F=${res.fidelity.toFixed(6)} syndrome=[${res.syndrome}] corr=x${res.correction.x}z${res.correction.z}`);
-        } else pass++;
+/* ------------------------------------------------------------------ */
+/* 3. Encoding circuits                                                */
+/* ------------------------------------------------------------------ */
+{
+  // bit-flip encoder: |ψ>|00> → α|000> + β|111>
+  const sv = new StateVector(3);
+  sv.prepareQubit0(Math.PI / 3, Math.PI / 5);
+  for (const op of CODE_3BITFLIP.encoding) sv.applyGateOp(op.gate, op.qubits, op.param);
+  // probability of |111> (index 7, little-endian) = |β|² = sin²(θ/2)
+  const p111 = sv.data[14] ** 2 + sv.data[15] ** 2;
+  check('encode: P(111) = sin²(θ/2)', approx(p111, Math.sin(Math.PI / 6) ** 2, 1e-9));
+  check('encode: GHZ structure (q0==q1==q2 always)', (() => {
+    // any basis state with nonzero amplitude must have all bits equal
+    for (let i = 0; i < 8; i++) {
+      const pr = sv.data[2 * i] ** 2 + sv.data[2 * i + 1] ** 2;
+      if (pr > 1e-12) {
+        const b0 = (i >> 0) & 1, b1 = (i >> 1) & 1, b2 = (i >> 2) & 1;
+        if (!(b0 === b1 && b1 === b2)) return false;
       }
     }
+    return true;
+  })());
+
+  // decode(encode(ψ)) = ψ
+  const sv2 = new StateVector(3);
+  sv2.prepareQubit0(Math.PI / 3, Math.PI / 5);
+  for (const op of CODE_3BITFLIP.encoding) sv2.applyGateOp(op.gate, op.qubits, op.param);
+  for (const op of CODE_3BITFLIP.decoding) sv2.applyGateOp(op.gate, op.qubits, op.param);
+  check('bit-flip: decode∘encode = identity', approx(fidelityFromRho(sv2.partialTraceQ0(), Math.PI / 3, Math.PI / 5), 1, 1e-9));
+
+  const sv3 = new StateVector(3);
+  sv3.prepareQubit0(Math.PI / 3, Math.PI / 5);
+  for (const op of CODE_3PHASEFLIP.encoding) sv3.applyGateOp(op.gate, op.qubits, op.param);
+  for (const op of CODE_3PHASEFLIP.decoding) sv3.applyGateOp(op.gate, op.qubits, op.param);
+  check('phase-flip: decode∘encode = identity', approx(fidelityFromRho(sv3.partialTraceQ0(), Math.PI / 3, Math.PI / 5), 1, 1e-9));
+
+  // phase-flip encoded state: (|+++> + |--->)/√2 in the X basis — equivalently
+  // α|+++> + β|---> — check via H-conjugated GHZ: apply H on all qubits of the
+  // encoded state and expect the bit-flip GHZ structure back
+  const sv4 = new StateVector(3);
+  sv4.prepareQubit0(0, 0); // |0>
+  for (const op of CODE_3PHASEFLIP.encoding) sv4.applyGateOp(op.gate, op.qubits, op.param);
+  sv4.applyGate1(0, GATES.H); sv4.applyGate1(1, GATES.H); sv4.applyGate1(2, GATES.H);
+  // now (|000> + |111>)/sqrt(2) — the bit-flip GHZ structure
+  const pGHZ0 = sv4.data[0] ** 2 + sv4.data[1] ** 2;
+  const pGHZ7 = sv4.data[14] ** 2 + sv4.data[15] ** 2;
+  check('phase-flip: H-conjugated encoding gives bit-flip GHZ', approx(pGHZ0, 0.5, 1e-9) && approx(pGHZ7, 0.5, 1e-9));
+}
+
+/* ------------------------------------------------------------------ */
+/* 4. Single-shot pipeline (matched pairs recover perfectly)           */
+/* ------------------------------------------------------------------ */
+{
+  // bit-flip code + X error on each qubit, |0> input
+  for (let q = 0; q < 3; q++) {
+    const r = runShot(CODE_3BITFLIP, { theta: 0, phi: 0, noise: 'bitflip', params: { p: 0 }, forcedErrors: [{ qubit: q, x: true }] }, makeRng(1));
+    check(`bit-flip: X@q${q} fully corrected (F=1)`, approx(r.fidelity, 1, 1e-9));
+    check(`bit-flip: X@q${q} detected`, r.detected);
   }
-  console.log(`  (${code.short}: single-error matrix checked)`);
+  // phase-flip code + Z error on each qubit, |0> input
+  for (let q = 0; q < 3; q++) {
+    const r = runShot(CODE_3PHASEFLIP, { theta: 0, phi: 0, noise: 'phaseflip', params: { p: 0 }, forcedErrors: [{ qubit: q, z: true }] }, makeRng(1));
+    check(`phase-flip: Z@q${q} fully corrected (F=1)`, approx(r.fidelity, 1, 1e-9));
+  }
+  // phase-flip code cannot see X errors: X@q1 acts as a LOGICAL X (invisible, state flips)
+  const inv = runShot(CODE_3PHASEFLIP, { theta: 0, phi: 0, noise: 'bitflip', params: { p: 0 }, forcedErrors: [{ qubit: 1, x: true }] }, makeRng(1));
+  check('phase-flip: X@q1 on |0> invisible but LOGICAL flip (F≈0)', !inv.detected && inv.fidelity < 0.2);
+
+  // double error on bit-flip code → mis-correction (F = 0 for |0>)
+  const dbl = runShot(CODE_3BITFLIP, { theta: 0, phi: 0, noise: 'bitflip', params: { p: 0 }, forcedErrors: [{ qubit: 0, x: true }, { qubit: 2, x: true }] }, makeRng(1));
+  check('bit-flip: 2 X errors → logical flip (F≈0)', dbl.fidelity < 0.2);
+
+  // |+> input through phase-flip code with a Z: perfect recovery of superposition
+  const sup = runShot(CODE_3PHASEFLIP, { theta: Math.PI / 2, phi: 0, noise: 'phaseflip', params: { p: 0 }, forcedErrors: [{ qubit: 0, z: true }] }, makeRng(1));
+  check('phase-flip: Z@q0 on |+> corrected (F=1)', approx(sup.fidelity, 1, 1e-9));
+
+  // depolarizing single X component is corrected on the matched code
+  const dep = runShot(CODE_3BITFLIP, { theta: 0, phi: 0, noise: 'depolarizing', params: { p: 0 }, forcedErrors: [{ qubit: 2, x: true }] }, makeRng(1));
+  check('bit-flip: X@q2 under depolarizing flagged & fixed', approx(dep.fidelity, 1, 1e-9));
 }
 
-// ---------------------------------------------------------------------------
-console.log('\n=== 4. Monte Carlo sanity vs theory ===');
+/* ------------------------------------------------------------------ */
+/* 5. Monte Carlo vs analytic theory                                   */
+/* ------------------------------------------------------------------ */
 {
-  // 3Q bit-flip code + bit-flip noise p=0.05, state |+> (theta=pi/2, phi=0)
-  // theory: F = 1 - P(>=2 errors) = 1 - (1 - [(1-p)^3 + 3p(1-p)^2])
-  const p = 0.05;
-  const pFail = 1 - ((1 - p) ** 3 + 3 * p * (1 - p) ** 2);
-  const r = mcRun(CODE_3BITFLIP, 'bitflip', { p }, Math.PI / 2, 0, 4000, 7);
-  console.log(`    theory F=${(1 - pFail).toFixed(6)}`);
-  console.log(`    MC     F=${r.fidelityQEC.toFixed(6)} (failRate=${r.failureRate.toFixed(4)})`);
-  // For |+>: logical X errors are invisible -> F_qec = 1 exactly
-  check('|+> QEC fidelity = 1 (X-invariant state)', r.fidelityQEC > 0.999, `got ${r.fidelityQEC}`);
-  // NOTE: for |+>, bit-flip errors are invisible (X|+>=|+>) so F=1 for BOTH — use |0> for comparison
-  const r2 = mcRun(CODE_3BITFLIP, 'bitflip', { p }, 0, 0, 4000, 7);
-  console.log(`    |0>: F_qec=${r2.fidelityQEC.toFixed(6)} F_bare=${r2.fidelityBefore.toFixed(6)} (bare theory 1-p=${1 - p})`);
-  check('bare |0> matches 1-p', Math.abs(r2.fidelityBefore - (1 - p)) < 0.01);
-  check('QEC beats bare for |0> too', r2.fidelityQEC > r2.fidelityBefore);
-  check('|0> QEC matches theory 1-P(>=2 errors)', Math.abs(r2.fidelityQEC - (1 - pFail)) < 0.01, `got ${r2.fidelityQEC}`);
-}
-{
-  // Steane + depolarizing p=0.02: F_qec should be ~ 1 - O(p^2) > bare 1-2p/3
-  const r = mcRun(CODE_STEANE7, 'depolarizing', { p: 0.02 }, Math.PI / 2, Math.PI / 4, 3000, 11);
-  console.log(`    Steane depol p=0.02: F_qec=${r.fidelityQEC.toFixed(5)} F_bare=${r.fidelityBefore.toFixed(5)}`);
-  check('Steane QEC > bare (depol 2%)', r.fidelityQEC > r.fidelityBefore);
-  check('Steane F > 0.995', r.fidelityQEC > 0.995, `F=${r.fidelityQEC}`);
-}
-{
-  // Shor code with amplitude damping γ=0.05, state |1> (logical |1> = |111>-block structure):
-  // single decay events are detected and reversed exactly by the Pauli table;
-  // F = 1 - O(γ²) from double jumps. Bare qubit: F = 1-γ.
-  const r = mcRun(CODE_SHOR9, 'amplitude-damping', { p: 0.05 }, Math.PI, 0, 2000, 3);
-  console.log(`    Shor amp-damp γ=0.05 |1>: F_qec=${r.fidelityQEC.toFixed(5)} F_bare=${r.fidelityBefore.toFixed(5)}`);
-  check('Shor amp-damp QEC > bare (|1> state)', r.fidelityQEC > r.fidelityBefore, `F_qec=${r.fidelityQEC}`);
-  check('Shor amp-damp F > 0.99', r.fidelityQEC > 0.99, `F=${r.fidelityQEC}`);
-}
-{
-  // 5-qubit code projection encoding + depolarizing
-  const r = mcRun(CODE_5QUBIT, 'depolarizing', { p: 0.03 }, Math.PI / 3, Math.PI / 7, 2000, 5);
-  console.log(`    5Q depol p=0.03: F_qec=${r.fidelityQEC.toFixed(5)} F_bare=${r.fidelityBefore.toFixed(5)}`);
-  check('5Q QEC > bare', r.fidelityQEC > r.fidelityBefore);
-  check('5Q F > 0.99', r.fidelityQEC > 0.99, `F=${r.fidelityQEC}`);
-}
+  // bit-flip code under X noise, |0> input:
+  // F = P(0 errors) + P(1 error) = (1-p)^3 + 3p(1-p)^2
+  const theoryF = (p) => (1 - p) ** 3 + 3 * p * (1 - p) ** 2;
+  for (const p of [0.05, 0.1, 0.2]) {
+    const r = mcRun(CODE_3BITFLIP, 'bitflip', { p }, 0, 0, 6000, 77 + Math.floor(p * 1000));
+    check(`MC: bit-flip code F matches theory at p=${p}`, approx(r.fidelityQEC, theoryF(p), 0.02));
+    // bare qubit under X noise on |0>: F = 1-p
+    check(`MC: bare F = 1-p at p=${p}`, approx(r.fidelityBefore, 1 - p, 0.02));
+    check(`MC: QEC beats bare at p=${p}`, r.fidelityQEC > r.fidelityBefore);
+  }
 
-// ---------------------------------------------------------------------------
-console.log('\n=== 5. Bare-qubit analytic fidelity vs trajectory simulation ===');
-{
-  // amplitude damping: compare analytic vs 20000-trajectory average on |1> (theta=pi)
-  const gamma = 0.3;
-  const analytic = bareQubitFidelity('amplitude-damping', { p: gamma }, Math.PI, 0);
-  // analytic formula check: F = c^2(c^2+γs^2) + s^4(1-γ) + 2c^2s^2√(1-γ) with c=0,s=1 → 1-γ
-  check('analytic AD |1> = 1-γ', Math.abs(analytic - (1 - gamma)) < 1e-9, `${analytic}`);
+  // phase-flip code under Z noise on |+>: F = (1-p)^3 + 3p(1-p)^2 as well
+  for (const p of [0.05, 0.1]) {
+    const r = mcRun(CODE_3PHASEFLIP, 'phaseflip', { p }, Math.PI / 2, 0, 6000, 55);
+    check(`MC: phase-flip code on |+> matches theory at p=${p}`, approx(r.fidelityQEC, theoryF(p), 0.02));
+  }
 
-  const sv = new StateVector(1);
-  sv.prepareQubit0(Math.PI, 0); // |1>
-  // run many trajectories manually
-  let sum = 0;
-  const N = 20000;
-  const rng = makeRng(99);
-  for (let i = 0; i < N; i++) {
-    const s2 = new StateVector(1);
-    s2.prepareQubit0(Math.PI, 0);
-    const p1 = s2.probOne(0);
-    if (rng() < gamma * p1) {
-      // jump: |1> -> |0>
-      const d = s2.data;
-      d[0] = d[2]; d[1] = d[3]; d[2] = 0; d[3] = 0;
-      const nrm = Math.sqrt(d[0] ** 2 + d[1] ** 2) || 1;
-      d[0] /= nrm; d[1] /= nrm;
+  // NOT MATCHED: bit-flip code under Z noise — Z is invisible; bare F = (1-p) + p<Z>²,
+  // code F identical (Z passes through) → improvement ≈ 1 (no harm, no help)
+  {
+    const r = mcRun(CODE_3BITFLIP, 'phaseflip', { p: 0.1 }, 0, 0, 4000, 21);
+    check('MC: NOT MATCHED (Z noise, bit-flip code) ≈ bare', approx(r.fidelityQEC, r.fidelityBefore, 0.01));
+  }
+
+  // depolarizing on bit-flip code, |0>: theory for the repetition code
+  // F = sum over error patterns the code can fix: 0 errors + exactly one X
+  //   (1-p)^3 + 3 · (p/3) · (1-p)^2  + patterns with one Y (acts as Z, invisible, F=1 for |0>)
+  // full analysis: P(correct) = (1-p)^3 + p(1-p)^2 (single X) + p(1-p)^2 (single Z invisible) + p(1-p)^2 (single Y: Z invisible, X fixed...) — complex; just check QEC > bare and F > 0.9 at p=0.05
+  {
+    const r = mcRun(CODE_3BITFLIP, 'depolarizing', { p: 0.05 }, 0, 0, 6000, 31);
+    check('MC: depolarizing p=0.05 → QEC F > 0.9', r.fidelityQEC > 0.9);
+    check('MC: depolarizing p=0.05 → QEC beats bare', r.fidelityQEC > r.fidelityBefore);
+  }
+
+  // Python-file headline: MATCHED pairing at the error-qubit level never fails
+  // (single error on the chosen qubit is always corrected) — verify via MC with
+  // forced single-qubit noise like the Python id-gate placement
+  {
+    let success = 0;
+    const n = 3000;
+    const rng = makeRng(99);
+    for (let i = 0; i < n; i++) {
+      const r = runShot(CODE_3BITFLIP, { theta: 0, phi: 0, noise: 'bitflip', params: { p: 0 }, forcedErrors: [{ qubit: 1, x: rng() < 0.3 }] }, rng);
+      if (r.fidelity > 0.999) success++;
     }
-    sum += fidelityFromRho(s2.partialTraceQ0(), Math.PI, 0);
+    check('Python semantics: id-gate X on q1 always corrected → 100% success', success === n);
   }
-  const avg = sum / N;
-  check(`trajectory avg F=${avg.toFixed(4)} ≈ 1-γ`, Math.abs(avg - (1 - gamma)) < 0.01);
+
+  // sweep machinery
+  const pts = sweepSV(CODE_3BITFLIP, 'bitflip', { p: 0.1 }, 0, 0, 1500, 5, [0.05, 0.1, 0.15]);
+  check('sweep: 3 points returned', pts.length === 3);
+  check('sweep: monotonic-ish F decrease', pts[0].fidelityQEC > pts[2].fidelityQEC);
+  check('sweep: improvement > 1 at low p', pts[0].improvement > 1.5);
+
+  // bare-qubit analytics
+  check('bare: X noise on |0> → 1-p', approx(bareQubitFidelity('bitflip', { p: 0.2 }, 0, 0), 0.8, 1e-9));
+  check('bare: depolarizing → 1-2p/3', approx(bareQubitFidelity('depolarizing', { p: 0.3 }, 0, 0), 0.8, 1e-9));
+  check('bare: Z noise on |+> → 1-p', approx(bareQubitFidelity('phaseflip', { p: 0.25 }, Math.PI / 2, 0), 0.75, 1e-9));
 }
 
-// ---------------------------------------------------------------------------
-console.log('\n=== 6. Surface code layout validity ===');
-for (const d of [3, 5, 7]) {
-  const layout = buildSurfaceLayout(d);
-  check(`d=${d}: counts ${(d*d-1)/2} each`, layout.stabsX.length === (d*d-1)/2 && layout.stabsZ.length === (d*d-1)/2, `X=${layout.stabsX.length} Z=${layout.stabsZ.length}`);
-
-  // all stabs commute (within type trivially; check via even overlap between X and Z stabs)
-  let commuting = true;
-  outer: for (const sx of layout.stabsX) {
-    for (const sz of layout.stabsZ) {
-      const overlap = sx.qubits.filter((q) => sz.qubits.some((q2) => q2[0] === q[0] && q2[1] === q[1])).length;
-      if (overlap % 2 === 1) { commuting = false; console.log(`    overlap ${overlap} between ${sx.label} and ${sz.label}`); break outer; }
-    }
-  }
-  check(`d=${d}: X/Z stabilizers commute (even overlaps)`, commuting);
-
-  // logical X (col 0) commutes with all Z stabs
-  let lxOK = true;
-  for (const sz of layout.stabsZ) {
-    const overlap = layout.logicalX.filter((q) => sz.qubits.some((q2) => q2[0] === q[0] && q2[1] === q[1])).length;
-    if (overlap % 2 === 1) lxOK = false;
-  }
-  check(`d=${d}: logical X commutes with Z stabs`, lxOK);
-
-  // logical Z (row 0) commutes with all X stabs
-  let lzOK = true;
-  for (const sx of layout.stabsX) {
-    const overlap = layout.logicalZ.filter((q) => sx.qubits.some((q2) => q2[0] === q[0] && q2[1] === q[1])).length;
-    if (overlap % 2 === 1) lzOK = false;
-  }
-  check(`d=${d}: logical Z commutes with X stabs`, lzOK);
-
-  // anticommutation of logicals: share (0,0) -> odd
-  check(`d=${d}: logicals anticommute`, layout.logicalX.some(([r, c]) => layout.logicalZ.some(([r2, c2]) => r === r2 && c === c2)));
-}
-
-// ---------------------------------------------------------------------------
-console.log('\n=== 7. Surface code: single-error correction ===');
+/* ------------------------------------------------------------------ */
+/* 6. Live multi-round pipeline (3D labs)                              */
+/* ------------------------------------------------------------------ */
 {
-  // single X error at every position, d=3: must be corrected (no logical error)
-  const d = 3;
-  // direct injection test: residual (error ⊕ correction) must be a stabilizer,
-  // i.e. commute with all Z-stabs AND have even overlap with the logical Z chain.
-  // (The correction does NOT need to land on the exact errored qubit — equivalence
-  // up to stabilizers is the correct criterion for degenerate surface codes.)
-  let singleOK = true;
-  const layout = getSurfaceLayout(d);
-  const graphZ = buildMatchingGraph(layout, 'Z');
-  const layoutL = layout;
-  for (let r = 0; r < d; r++) {
-    for (let c = 0; c < d; c++) {
-      const q = r * d + c;
-      const syndromeZ = layout.stabsZ.map((st) => st.qubits.some(([rr, cc]) => rr * d + cc === q) ? 1 : 0);
-      const defects = syndromeZ.map((s, i) => (s ? i : -1)).filter((i) => i >= 0);
-      const { pairs, toBoundary } = matchDefects(graphZ, defects);
-      const corrected = new Array(d * d).fill(false);
-      corrected[q] = true; // the error itself
-      for (const [i, j] of pairs) for (const qq of graphZ.path[i][j]) corrected[qq] = !corrected[qq];
-      for (const i of toBoundary) for (const qq of graphZ.pathB[i]) corrected[qq] = !corrected[qq];
-      // residual = corrected pattern (error XOR correction)
-      let isStabilizer = true;
-      for (const st of layout.stabsZ) {
-        const overlap = st.qubits.filter(([rr, cc]) => corrected[rr * d + cc]).length;
-        if (overlap % 2 === 1) isStabilizer = false;
-      }
-      const row0 = layoutL.logicalZ.filter(([rr, cc]) => corrected[rr * d + cc]).length;
-      if (!isStabilizer || row0 % 2 === 1) {
-        singleOK = false;
-        console.log(`    X error at (${r},${c}): residual NOT trivial (stabOK=${isStabilizer}, row0=${row0})`);
-      }
-    }
+  const sv = prepareEncodedState(CODE_3BITFLIP, 0, 0);
+  const rng = makeRng(7);
+  let fSum = 0;
+  let sawCorrection = false;
+  const rounds = 200;
+  for (let i = 0; i < rounds; i++) {
+    const r = runLiveRound(CODE_3BITFLIP, sv, 'bitflip', { p: 0.15 }, rng, 0, 0, true);
+    fSum += r.fidelity;
+    if (r.correction.x.length > 0) sawCorrection = true;
   }
-  check('d=3: every single X error neutralized by matching', singleOK);
+  // The persistent trajectory is a telegraph process: double errors flip |0_L> ↔ |1_L>
+  // (rate P(≥2 errors) ≈ 0.0608/round) and later double errors flip it back.
+  let sawFail = false, sawRecover = false;
+  let prevFail = false;
+  for (let i = 0; i < rounds; i++) {
+    const r = runLiveRound(CODE_3BITFLIP, sv, 'bitflip', { p: 0.15 }, rng, 0, 0, true);
+    fSum += r.fidelity;
+    if (r.correction.x.length > 0) sawCorrection = true;
+    if (r.fidelity < 0.5) { sawFail = true; prevFail = true; }
+    else if (prevFail && r.fidelity > 0.99) sawRecover = true;
+  }
+  check('live: failures occur (double-error rounds)', sawFail);
+  check('live: trajectory recovers to the right logical state afterwards', sawRecover);
+  check('live: corrections actually happened', sawCorrection);
+
+  // QEC off → state degrades
+  const sv2 = prepareEncodedState(CODE_3BITFLIP, 0, 0);
+  const rng2 = makeRng(7);
+  let degraded = false;
+  for (let i = 0; i < 40; i++) {
+    const r = runLiveRound(CODE_3BITFLIP, sv2, 'bitflip', { p: 0.2 }, rng2, 0, 0, false);
+    if (r.fidelity < 0.9) degraded = true;
+  }
+  check('live: QEC OFF degrades the state', degraded);
+
+  // readLogicalBloch: non-destructive readout returns |0> for encoded |0>
+  const sv3 = prepareEncodedState(CODE_3BITFLIP, 0, 0);
+  const ro1 = readLogicalBloch(CODE_3BITFLIP, sv3, 0, 0);
+  check('readLogicalBloch: encoded |0> reads z≈+1', ro1.bloch.z > 0.999);
+  // state still intact for engine use (non-destructive)
+  const r4 = runLiveRound(CODE_3BITFLIP, sv3, 'bitflip', { p: 0 }, rng, 0, 0, true);
+  check('readLogicalBloch: non-destructive (round after read still F=1)', approx(r4.fidelity, 1, 1e-9));
+
+  // bare round
+  const bare = new StateVector(1);
+  bare.prepareQubit0(0, 0);
+  const br = runBareRound(bare, 'bitflip', { p: 0.5 }, makeRng(3), 0, 0);
+  check('bareRound: returns valid bloch', Math.hypot(br.bloch.x, br.bloch.y, br.bloch.z) <= 1.0001);
 }
 
-// ---------------------------------------------------------------------------
-console.log('\n=== 8. Surface code threshold behavior ===');
+/* ------------------------------------------------------------------ */
+/* 7. Noise channel sampling sanity                                    */
+/* ------------------------------------------------------------------ */
 {
-  const shots = 20000;
-  for (const d of [3, 5, 7]) {
-    const low = 0.03, high = 0.15;
-    const rLow = (() => {
-      let f = 0;
-      for (let s = 0; s < shots; s++) if (runSurfaceShot(d, 'bitflip', low, makeRng(1000 + s)).logicalError) f++;
-      return f / shots;
-    })();
-    const rHigh = (() => {
-      let f = 0;
-      for (let s = 0; s < shots; s++) if (runSurfaceShot(d, 'bitflip', high, makeRng(2000 + s)).logicalError) f++;
-      return f / shots;
-    })();
-    console.log(`    d=${d}: P_L(p=0.03)=${rLow.toFixed(5)}, P_L(p=0.15)=${rHigh.toFixed(5)}`);
-    if (d === 3) {
-      // d=3 code-capacity: P_L ~ 18·p^2 (weight-2 logical aliases) — exact known scaling
-      const theory = 18 * low * low * Math.pow(1 - low, 7);
-      check(`d=3: P_L matches 18p² theory (${theory.toFixed(5)})`, Math.abs(rLow - theory) < 0.005, `P_L=${rLow}`);
-    } else {
-      check(`d=${d}: P_L below threshold << p`, rLow < low / 4, `P_L=${rLow}`);
+  // bit-flip channel: exactly p fraction of qubits flip on average
+  const sv = new StateVector(9);
+  const rng = makeRng(1234);
+  let flips = 0;
+  const trials = 3000;
+  for (let i = 0; i < trials; i++) {
+    const ev = applyNoiseLayer(sv, 'bitflip', { p: 0.3 }, rng);
+    for (const e of ev) {
+      if (e.kind === 'X') flips++;
+      // undo for the next trial
+      sv.applyGate1(e.qubit, GATES.X);
     }
-    check(`d=${d}: P_L above threshold > p/2 (no protection)`, rHigh > high / 4);
-    if (d === 5) check('d=5 better than d=3 below threshold', true); // placeholder, curve compared in UI
   }
-  // d scaling below threshold: P_L(d=5) < P_L(d=3) at p=0.07
-  const p = 0.07;
-  const pl3 = (() => { let f = 0; for (let s = 0; s < 20000; s++) if (runSurfaceShot(3, 'bitflip', p, makeRng(3000 + s)).logicalError) f++; return f / 20000; })();
-  const pl5 = (() => { let f = 0; for (let s = 0; s < 20000; s++) if (runSurfaceShot(5, 'bitflip', p, makeRng(4000 + s)).logicalError) f++; return f / 20000; })();
-  console.log(`    p=0.07: P_L(d=3)=${pl3.toFixed(5)}, P_L(d=5)=${pl5.toFixed(5)}`);
-  check('P_L(d=5) < P_L(d=3) at p=0.07', pl5 < pl3, `d3=${pl3}, d5=${pl5}`);
+  check('noise: bitflip event rate ≈ p', approx(flips / (trials * 9), 0.3, 0.02));
+
+  // depolarizing: X/Y/Z equally likely
+  const counts = { X: 0, Y: 0, Z: 0 };
+  const sv2 = new StateVector(9);
+  const rng2 = makeRng(5678);
+  for (let i = 0; i < 12000; i++) {
+    const ev = applyNoiseLayer(sv2, 'depolarizing', { p: 1 }, rng2);
+    for (const e of ev) {
+      counts[e.kind] = (counts[e.kind] ?? 0) + 1;
+      sv2.applyGate1(e.qubit, e.kind === 'X' ? GATES.X : e.kind === 'Y' ? GATES.Y : GATES.Z);
+    }
+  }
+  const total = counts.X + counts.Y + counts.Z;
+  check('noise: depolarizing uniform thirds (X)', approx(counts.X / total, 1 / 3, 0.03));
+  check('noise: depolarizing uniform thirds (Y)', approx(counts.Y / total, 1 / 3, 0.03));
+  check('noise: depolarizing uniform thirds (Z)', approx(counts.Z / total, 1 / 3, 0.03));
+
+  // phase-flip event rate
+  const sv3 = new StateVector(9);
+  const rng3 = makeRng(4321);
+  let zFlips = 0;
+  for (let i = 0; i < 2000; i++) {
+    const ev = applyNoiseLayer(sv3, 'phaseflip', { p: 0.25 }, rng3);
+    zFlips += ev.length;
+    for (const e of ev) sv3.applyGate1(e.qubit, GATES.Z);
+  }
+  check('noise: phaseflip event rate ≈ p', approx(zFlips / 18000, 0.25, 0.02));
 }
 
-// ---------------------------------------------------------------------------
-console.log(`\n=== RESULT: ${pass} passed, ${fail} failed ===`);
-if (fail > 0) process.exit(1);
+/* ------------------------------------------------------------------ */
+/* 8. Trace (Simulator Lab UI payload)                                 */
+/* ------------------------------------------------------------------ */
+{
+  const tr = runTrace(CODE_3BITFLIP, 'bitflip', { p: 0.1 }, 0, 0, 42, [{ qubit: 1, x: true, z: false }]);
+  check('trace: code name carried', tr.codeName === '3-Qubit Bit-Flip Code');
+  check('trace: noise name carried', tr.noiseName === 'Bit-Flip Noise (X)');
+  check('trace: X@q1 → syndrome 11 → correction q1', tr.syndrome.every((s) => (s.label === 'Z0 Z1' ? s.bit === 1 : s.label === 'Z1 Z2' ? s.bit === 1 : true)) && tr.correction.x[0] === 1);
+  check('trace: recovered', tr.recovered && approx(tr.fidelity, 1, 1e-9));
+  check('trace: measured outcome = 0', tr.measuredOutcome === 0);
+  check('trace: detection note mentions correction', tr.detectionNote.includes('flags'));
+  check('trace: no projection encoding flag', tr.projectionEncoding === undefined);
+
+  // clean shot
+  const tr2 = runTrace(CODE_3PHASEFLIP, 'phaseflip', { p: 0.0 }, 0, 0, 5, null);
+  check('trace: clean shot has trivial syndrome', tr2.syndrome.every((s) => s.bit === 0));
+  check('trace: clean shot F=1', approx(tr2.fidelity, 1, 1e-9));
+}
+
+/* ------------------------------------------------------------------ */
+/* 9. Python circuit definitions (exact file match)                    */
+/* ------------------------------------------------------------------ */
+{
+  const c1 = buildPythonCircuit(1, 1, 1);
+  check('py circuit: title = bit_flip_qec', c1.title === 'bit_flip_qec(input_bit, error_qubit)');
+  check('py circuit: 5 qubits + 3 classical bits', c1.nQ === 5 && c1.nC === 3);
+  const gates1 = c1.ops.filter((o) => o.kind === 'cnot').length;
+  check('py circuit: bit-flip has 8 CNOTs (2 encode + 4 syndrome + 2 decode)', gates1 === 8);
+  check('py circuit: 1 id gate on error qubit', c1.ops.filter((o) => o.kind === 'gate' && o.gate === 'ID').length === 1 && c1.ops.find((o) => o.kind === 'gate' && o.gate === 'ID')?.qubit === 1);
+  check('py circuit: input X present for input_bit=1', c1.ops.some((o) => o.kind === 'gate' && o.gate === 'X' && o.qubit === 0));
+  check('py circuit: 3 measurements', c1.ops.filter((o) => o.kind === 'measure').length === 3);
+  check('py circuit: 3 conditional corrections', c1.ops.filter((o) => o.kind === 'ifx').length === 3);
+  const ifx = c1.ops.filter((o) => o.kind === 'ifx');
+  check('py circuit: if_test mapping 01→q0, 11→q1, 10→q2', ifx[0].regValue === 1 && ifx[0].target === 0 && ifx[1].regValue === 3 && ifx[1].target === 1 && ifx[2].regValue === 2 && ifx[2].target === 2);
+
+  const c2 = buildPythonCircuit(2, 0, 2);
+  const hCount = c2.ops.filter((o) => o.kind === 'gate' && o.gate === 'H').length;
+  check('py circuit: phase-flip has 8 H gates (1+3+3+1)', hCount === 8);
+  check('py circuit: no input X for input_bit=0', !c2.ops.some((o) => o.kind === 'gate' && o.gate === 'X'));
+  check('py circuit: id gate on q2', c2.ops.find((o) => o.kind === 'gate' && o.gate === 'ID')?.qubit === 2);
+  // decode order (file): cx(0,2) then cx(0,1)
+  const decodes = c2.ops.filter((o) => o.kind === 'cnot').slice(-2);
+  check('py circuit: phase-flip decode order cx(0,2)→cx(0,1)', decodes[0].control === 0 && decodes[0].target === 2 && decodes[1].target === 1);
+}
+
+/* ------------------------------------------------------------------ */
+console.log(`\n${passed} passed, ${failed} failed`);
+if (failures.length) {
+  console.log('FAILURES:');
+  failures.forEach((f) => console.log('  ✗ ' + f));
+  process.exit(1);
+}
+console.log('ALL GREEN');

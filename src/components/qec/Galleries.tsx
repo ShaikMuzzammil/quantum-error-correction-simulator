@@ -20,23 +20,21 @@ import { NOISE_MODELS } from '@/lib/qec/noise';
 /* ------------------------------------------------------------------ */
 
 export function CodeGallery() {
-  const svIds = new Set(SV_CODES.map((c) => c.id));
-  const svCodes = CODE_REGISTRY.filter((c) => svIds.has(c.id));
-  const surfaceCodes = CODE_REGISTRY.filter((c) => !svIds.has(c.id));
+  const svCodes = CODE_REGISTRY;
 
   return (
     <div className="flex flex-col gap-6">
       <div>
         <h2 className="mb-1 text-xl font-semibold text-slate-100">QEC Code Explorer</h2>
         <p className="mb-4 text-sm text-slate-500">
-          Every code below runs live in the simulator. [[n, k, d]] = n physical qubits protecting k logical qubits
-          with distance d (corrects up to ⌊(d−1)/2⌋ arbitrary single-qubit errors).
+          The two codes of all_with_noise_prob.py — both run live in the simulator. [[n, k, d]] = n physical qubits
+          protecting k logical qubits with distance d (corrects up to ⌊(d−1)/2⌋ errors of the targeted type).
         </p>
         <Accordion type="single" collapsible className="flex flex-col gap-3">
           {svCodes.map((c) => {
             const def = getSVCode(c.id);
             return (
-              <AccordionItem key={c.id} value={c.id} className="rounded-xl border glass border-white/8 px-5 last:border-b">
+              <AccordionItem key={c.id} value={c.id} className="rounded-xl border border-violet-500/20 bg-[#141126] px-5 last:border-b">
                 <AccordionTrigger className="py-4 hover:no-underline">
                   <div className="flex flex-wrap items-center gap-3 text-left">
                     <span className="text-sm font-semibold text-slate-100">{c.name}</span>
@@ -84,22 +82,6 @@ export function CodeGallery() {
               </AccordionItem>
             );
           })}
-
-          {surfaceCodes.map((c) => (
-            <AccordionItem key={c.id} value={c.id} className="rounded-xl border border-cyan-500/20 bg-[#101822] px-5 last:border-b">
-              <AccordionTrigger className="py-4 hover:no-underline">
-                <div className="flex flex-wrap items-center gap-3 text-left">
-                  <span className="text-sm font-semibold text-slate-100">{c.name}</span>
-                  <Badge variant="outline" className="border-cyan-500/40 text-cyan-300">[[{c.n},{c.k},{c.d}]]</Badge>
-                  <Badge variant="outline" className="border-cyan-500/40 text-cyan-300">{c.family}</Badge>
-                  <span className="text-xs text-slate-500">MWPM decoder</span>
-                </div>
-              </AccordionTrigger>
-              <AccordionContent className="pb-5">
-                <p className="text-sm leading-relaxed text-slate-400">{c.description}</p>
-              </AccordionContent>
-            </AccordionItem>
-          ))}
         </Accordion>
       </div>
     </div>
@@ -116,17 +98,18 @@ export function NoiseGallery() {
       <div>
         <h2 className="mb-1 text-xl font-semibold text-slate-100">Noise Model Library</h2>
         <p className="mb-4 text-sm text-slate-500">
-          All eight channels from our literature survey, implemented with exact quantum-trajectory sampling
-          (state-vector codes) or Pauli-frame sampling (surface codes).
+          Exactly the three channels of all_with_noise_prob.py&apos;s build_noise_model(), implemented with exact
+          quantum-trajectory sampling on the state-vector engine. The Python file attaches each error to the id gate
+          of the chosen error qubit; here every shot samples it live.
         </p>
         <div className="grid gap-4 md:grid-cols-2">
           {NOISE_MODELS.map((m) => (
-            <Card key={m.id} className="glass border-white/8">
+            <Card key={m.id} className="border-violet-500/20 bg-[#141126]">
               <CardHeader className="pb-2">
                 <CardTitle className="flex flex-wrap items-center gap-2 text-sm">
                   <span className="text-slate-100">{m.name}</span>
-                  <Badge variant="outline" className={`${m.pauliOnly ? 'border-emerald-500/40 text-emerald-400' : 'border-amber-500/40 text-amber-400'}`}>
-                    {m.pauliOnly ? 'Pauli (surface-compatible)' : 'non-Pauli'}
+                  <Badge variant="outline" className="border-cyan-500/40 text-cyan-300">
+                    Python noise {m.pythonType}
                   </Badge>
                 </CardTitle>
               </CardHeader>
@@ -168,7 +151,7 @@ export function Literature() {
         <p className="mb-4 text-sm text-slate-500">
           The ten studies surveyed in Phase 1 — this simulator unifies their methodologies in one environment.
         </p>
-        <Card className="glass border-white/8">
+        <Card className="border-violet-500/20 bg-[#141126]">
           <CardContent className="p-0">
             <Table>
               <TableHeader>
@@ -202,7 +185,7 @@ export function Literature() {
           {[
             {
               gap: '1 · Limited coverage of noise conditions',
-              fix: 'Eight noise channels — including non-Pauli amplitude damping, thermal relaxation, coherent over-rotation and correlated crosstalk — across ALL nine code configurations, instead of one noise per paper.',
+              fix: 'The three canonical noise channels of our Python reference — bit-flip (X), phase-flip (Z) and depolarizing — sampled live on both QEC codes, with manual error injection on any qubit, instead of one noise per paper.',
             },
             {
               gap: '2 · Difficulty comparing QEC performance',
@@ -233,26 +216,28 @@ export function Literature() {
 export function About() {
   return (
     <div className="flex flex-col gap-6">
-      <Card className="glass border-white/8">
+      <Card className="border-violet-500/20 bg-[#141126]">
         <CardContent className="flex flex-col gap-4 p-6">
           <h2 className="text-xl font-semibold text-slate-100">About This Prototype</h2>
           <p className="text-sm leading-relaxed text-slate-400">
-            This web application is the Phase-2 deliverable of our project <span className="text-violet-300">&ldquo;An Interactive
-            Quantum Error Correction Simulator&rdquo;</span>. It implements the three objectives defined in Phase 1 as a fully
-            client-side web application: a from-scratch quantum simulation engine in TypeScript (no external quantum
-            libraries), a state-vector backend with quantum-trajectory noise sampling and projective stabilizer
-            measurements for codes up to 9 data qubits, and a Pauli-frame stabilizer backend with an exact
-            minimum-weight-perfect-matching decoder for rotated surface codes up to distance 7.
+            <span className="font-semibold text-slate-200">Amrita Vishwa Vidyapeetham</span> — this web application is the
+            Phase-2 deliverable of our project <span className="text-violet-300">&ldquo;An Interactive Quantum Error
+            Correction Simulator&rdquo;</span>. It implements the objectives defined in Phase 1 as a fully client-side web
+            application, focused exactly on the scope of our Python reference program (all_with_noise_prob.py): the
+            3-Qubit Bit-Flip and 3-Qubit Phase-Flip codes under Bit-Flip (X), Phase-Flip (Z) and Depolarizing noise —
+            with a from-scratch state-vector quantum simulation engine in TypeScript (no external quantum libraries),
+            quantum-trajectory noise sampling, projective stabilizer measurements and the same encode → syndrome →
+            correct → decode pipeline the Python program runs.
           </p>
           <div className="grid gap-3 md:grid-cols-2">
             <div className="rounded-lg border border-cyan-500/20 bg-cyan-500/5 p-4">
               <h3 className="mb-2 text-sm font-semibold text-cyan-300">Engine Highlights</h3>
               <ul className="list-disc space-y-1 pl-5 text-xs leading-relaxed text-slate-400">
-                <li>Full state-vector simulation (complex amplitudes, up to 2⁹ dimensions) with 125 automated correctness tests passing</li>
-                <li>Quantum trajectories for non-Pauli channels (amplitude damping, thermal relaxation, coherent rotations)</li>
-                <li>Projective stabilizer measurement with optional syndrome readout error</li>
-                <li>Exact MWPM decoding (subset DP) with BFS shortest-path recovery on the stabilizer graph</li>
-                <li>Reproduced physics: 3-qubit code matches theory to <span className="font-mono">1−P(≥2 errors)</span>; surface-code threshold at ~10%; P_L(d=3) = 18p² exact scaling</li>
+                <li>Full state-vector simulation (complex amplitudes, 2³ = 8 dimensions per block) with an automated correctness suite</li>
+                <li>Exact quantum-trajectory sampling of all three Python noise channels</li>
+                <li>Projective stabilizer measurement — the ancilla-free equivalent of the Python file&apos;s q3/q4 ancilla checks</li>
+                <li>Auto-generated syndrome → correction tables identical to the Python mapping (01→q0, 11→q1, 10→q2)</li>
+                <li>Reproduced physics: matched code/noise pairs recover perfectly; Monte Carlo matches the analytic 1−3p²+2p³ curve</li>
               </ul>
             </div>
             <div className="rounded-lg border border-violet-500/20 bg-violet-500/5 p-4">
@@ -266,14 +251,14 @@ export function About() {
               </ul>
             </div>
           </div>
-          <div className="rounded-lg border border-amber-400/30 bg-amber-400/[0.06] p-4">
-            <h3 className="mb-2 text-sm font-semibold text-amber-300">What&apos;s new in v6 — the 4D Lab rebuild</h3>
+          <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-4">
+            <h3 className="mb-2 text-sm font-semibold text-amber-300">What&apos;s new in this edition — Focused on our Python pipeline</h3>
             <ul className="list-disc space-y-1 pl-5 text-xs leading-relaxed text-slate-400">
-              <li><span className="text-amber-200">Four live 3D/4D simulators</span>: Bloch Flight 4D (target pin + live fidelity chart), State Cityscape 3D (true city grid, up to 32 shaded towers), Spacetime Lattice 4D (connected time axis, floor panels, d up to 9 × 16 rounds) — and the new Threshold Terrain 4D.</li>
-              <li><span className="text-amber-200">Threshold Terrain 4D</span>: 2,500+ complete surface-code experiments run live in your browser, building the logical-error-rate terrain in 3D and reporting a measured threshold estimate.</li>
-              <li><span className="text-amber-200">Plain-language pass</span>: every 3D-lab explanation and “Try this” rewritten in short, simple sentences — nothing about the physics removed.</li>
-              <li><span className="text-amber-200">Detailed deploy guide</span>: README now walks from GitHub push to a live Vercel site, step by step.</li>
-              <li><span className="text-amber-200">Everything else kept</span>: aurora-glass UI, live pipeline playback, streaming Monte Carlo, Code Showdown, one-shot 3D/4D labs, PDF/JSON/CSV exports, and the 125-test verified engine.</li>
+              <li><span className="text-amber-200">Scope exactly = all_with_noise_prob.py</span>: 2 QEC codes (bit-flip, phase-flip) × 3 noise channels (X, Z, depolarizing) — every extra code/noise from earlier drafts was removed so everything you see is what the Python program implements.</li>
+              <li><span className="text-amber-200">Exact Python circuits in-app</span>: the Simulator Lab renders the real 5-qubit + 3-classical-bit circuits — id-gate noise insertion, q3/q4 syndrome measurement, conditional if_test corrections and the Python QEC STATUS verdict.</li>
+              <li><span className="text-amber-200">New 3D visualizers</span>: an interactive Bloch Sphere pipeline walkthrough and a 4D Syndrome Spacetime view of the bit-flip code join Bloch Flight 4D and the State Cityscape.</li>
+              <li><span className="text-amber-200">Circuit-aware exports</span>: every printable report can embed the exact circuit diagram alongside the full inputs/outputs tables.</li>
+              <li><span className="text-amber-200">Everything verified</span>: automated engine tests, Monte Carlo matched against the analytic success formula, all tabs browser-tested.</li>
             </ul>
           </div>
           <div className="rounded-lg border border-slate-600/30 bg-slate-800/20 p-4">
@@ -282,8 +267,8 @@ export function About() {
               {[
                 ['Overview', 'Project goals, worked example tour, quick start'],
                 ['Simulator Lab', 'Single-shot full pipeline · guides + explanation tabs'],
-                ['3D Quantum Lab', 'Bloch Flight 4D · State Cityscape · Spacetime Lattice · Threshold Terrain (one-shot runs)'],
-                ['Performance Lab', 'Live Monte Carlo · sweeps · Code Showdown · exports'],
+                ['3D Quantum Lab', 'Bloch Flight 4D · State Cityscape · Syndrome Spacetime 4D · Bloch Sphere 3D'],
+                ['Performance Lab', 'Monte Carlo & sweeps · pseudo-threshold chart · exports'],
                 ['Learn', 'Compact how-to · six ideas · glossary · FAQ'],
                 ['Reference', 'QEC Codes + Noise Models + Literature in one tab'],
                 ['About', 'This page — engine, stack, team'],
@@ -296,7 +281,7 @@ export function About() {
             </div>
           </div>
           <div className="rounded-lg border border-slate-600/30 bg-slate-800/20 p-4">
-            <h3 className="mb-2 text-sm font-semibold text-slate-200">Project Team</h3>
+            <h3 className="mb-2 text-sm font-semibold text-slate-200">Project Team — Amrita Vishwa Vidyapeetham</h3>
             <div className="grid gap-2 text-xs text-slate-400 sm:grid-cols-3">
               <div><span className="text-slate-200">K. Devendra Reddy</span> — CH.SC.U4CSE24021</div>
               <div><span className="text-slate-200">Shaik Muzzammil</span> — CH.SC.U4CSE24041</div>

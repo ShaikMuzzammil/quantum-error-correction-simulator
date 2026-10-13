@@ -1,11 +1,21 @@
 /**
  * Quantum Error Correction codes (state-vector engine).
  *
+ * SCOPE — this prototype implements exactly what our Python reference
+ * (all_with_noise_prob.py) implements, nothing more:
+ *   1. 3-Qubit Bit-Flip QEC   (bit_flip_qec)
+ *   2. 3-Qubit Phase-Flip QEC (phase_flip_qec)
+ *
  * Each code defines:
  *  - encoding / decoding circuits (real unitary circuits, visualized in the UI)
- *  - stabilizer generators (syndrome extracted via projective Pauli measurements)
+ *  - stabilizer generators (syndrome extracted via projective Pauli measurements —
+ *    the ancilla-free equivalent of the Python file's q3/q4 ancilla checks)
  *  - an auto-generated syndrome -> correction lookup table (single-error optimal,
  *    nearest-match fallback for uncorrectable multi-error syndromes)
+ *
+ * The exact Python-file circuits (5 qubits + 3 classical bits, mid-circuit
+ * syndrome measurement and conditional corrections) are defined in
+ * buildPythonCircuit() and rendered 1:1 in the Simulator Lab.
  */
 
 import { Pauli, RNG, StateVector, GATES, fidelityFromRho, blochFromRho } from './engine';
@@ -45,7 +55,8 @@ export interface SVCodeDef {
   decoding: GateOp[]; // inverse circuit
   stabilizers: StabilizerDef[];
   correctionTable: Map<string, Correction>; // key = syndrome bit string
-  projectionEncoding?: boolean; // 5-qubit code: encoded via stabilizer projection
+  /** 1 = bit-flip QEC, 2 = phase-flip QEC — the Python file's qec_type */
+  pythonType: 1 | 2;
 }
 
 // ---------------------------------------------------------------------------
@@ -68,21 +79,17 @@ export function syndromeOfError(code: SVCodeDef, qubit: number, err: Pauli): num
 
 /**
  * Build the syndrome -> correction map by enumerating all single-qubit errors.
- * First occurrence wins (handles degenerate codes like Shor correctly:
- * any within-block Z correction is equivalent up to stabilizers).
+ * First occurrence wins; errors with a trivial (all-zero) syndrome are invisible
+ * to the code (degenerate with identity) and must NOT be corrected.
  */
 export function buildCorrectionTable(code: Omit<SVCodeDef, 'correctionTable'>): Map<string, Correction> {
   const table = new Map<string, Correction>();
   // Order matters: pure X and Z errors take priority over Y in the lookup table.
-  // Codes that cannot correct Y (e.g. repetition codes) share syndromes between
-  // Y and the correctable pure error — the pure correction is the right choice.
-  // Codes that DO correct Y (Shor/Steane/5-qubit) have distinct Y syndromes, so
-  // this ordering is harmless for them.
+  // The repetition-style 3-qubit codes cannot distinguish Y from its X/Z component,
+  // so the pure correction is the right choice (matches the Python file's X fixes).
   for (let q = 0; q < code.n; q++) {
     for (const err of ['X', 'Z', 'Y'] as Pauli[]) {
       const bits = syndromeOfError(code as SVCodeDef, q, err);
-      // Errors with an all-zero syndrome are invisible to this code (degenerate with
-      // identity, e.g. Z errors on a bit-flip code) — they must NOT be corrected.
       if (bits.every((b) => b === 0)) continue;
       const key = syndromeKey(bits);
       if (!table.has(key)) {
@@ -121,7 +128,7 @@ export function lookupCorrection(code: SVCodeDef, syndrome: number[]): Correctio
 }
 
 // ---------------------------------------------------------------------------
-// Code definitions
+// Code definitions — EXACTLY the two codes from all_with_noise_prob.py
 // ---------------------------------------------------------------------------
 
 function pauliStr(spec: string): Pauli[] {
@@ -132,11 +139,12 @@ function reverseOps(ops: GateOp[]): GateOp[] {
   return [...ops].reverse();
 }
 
-// --- 3-qubit bit-flip code --------------------------------------------------
+// --- 3-qubit bit-flip code (python_type = 1) --------------------------------
+// Python: qc.cx(0,1); qc.cx(0,2)  — encodes |psi> into alpha|000> + beta|111>
 
 const enc3b: GateOp[] = [
-  { gate: 'CNOT', qubits: [0, 1] },
-  { gate: 'CNOT', qubits: [0, 2] },
+  { gate: 'CNOT', qubits: [0, 1], comment: 'copy q0 into q1' },
+  { gate: 'CNOT', qubits: [0, 2], comment: 'copy q0 into q2' },
 ];
 
 const code3BitflipBase = {
@@ -149,9 +157,9 @@ const code3BitflipBase = {
   family: 'Repetition (CSS-like)',
   corrects: '1 bit-flip (X) error',
   description:
-    'Encodes |psi> into alpha|000> + beta|111>. Majority voting via two Z-parity stabilizers ' +
-    'localizes a single bit-flip. The workhorse introductory QEC code and the exact scheme ' +
-    'walked through in our Phase-1 architecture example.',
+    'Encodes |psi> into alpha|000> + beta|111>. Majority voting via two Z-parity checks ' +
+    '(q3 checks q0,q1 and q4 checks q1,q2 in the Python circuit) localizes a single bit-flip. ' +
+    'This is the workhorse introductory QEC code and the exact scheme in all_with_noise_prob.py.',
   logicalX: pauliStr('XXX'),
   logicalZ: pauliStr('ZZZ'),
   encoding: enc3b,
@@ -160,6 +168,7 @@ const code3BitflipBase = {
     { paulis: pauliStr('ZZI'), label: 'Z0 Z1', type: 'Z' as const },
     { paulis: pauliStr('IZZ'), label: 'Z1 Z2', type: 'Z' as const },
   ],
+  pythonType: 1 as const,
 };
 
 export const CODE_3BITFLIP: SVCodeDef = {
@@ -167,13 +176,15 @@ export const CODE_3BITFLIP: SVCodeDef = {
   correctionTable: buildCorrectionTable(code3BitflipBase as SVCodeDef),
 };
 
-// --- 3-qubit phase-flip code -------------------------------------------------
+// --- 3-qubit phase-flip code (python_type = 2) --------------------------------
+// Python: H(0); CX(0,1); CX(0,2); H(0),H(1),H(2) — convert to phase basis,
+// protect against Z flips with X-parity checks, then convert back.
 
 const enc3p: GateOp[] = [
-  { gate: 'H', qubits: [0] },
+  { gate: 'H', qubits: [0], comment: 'convert to phase basis' },
   { gate: 'CNOT', qubits: [0, 1] },
   { gate: 'CNOT', qubits: [0, 2] },
-  { gate: 'H', qubits: [0] },
+  { gate: 'H', qubits: [0], comment: 'encode into |+++>/|--- basis' },
   { gate: 'H', qubits: [1] },
   { gate: 'H', qubits: [2] },
 ];
@@ -190,7 +201,8 @@ const code3PhaseflipBase = {
   description:
     'The Hadamard-conjugate of the bit-flip code: encodes into the GHZ-like state ' +
     '(|+++> + |--->)/sqrt(2) and corrects a single phase flip using X-parity checks. ' +
-    'Demonstrates that phase errors require a different detection strategy.',
+    'Demonstrates that phase errors require a different detection strategy — the second ' +
+    'circuit in all_with_noise_prob.py.',
   logicalX: pauliStr('XXX'),
   logicalZ: pauliStr('ZZZ'),
   encoding: enc3p,
@@ -199,6 +211,7 @@ const code3PhaseflipBase = {
     { paulis: pauliStr('XXI'), label: 'X0 X1', type: 'X' as const },
     { paulis: pauliStr('IXX'), label: 'X1 X2', type: 'X' as const },
   ],
+  pythonType: 2 as const,
 };
 
 export const CODE_3PHASEFLIP: SVCodeDef = {
@@ -206,202 +219,7 @@ export const CODE_3PHASEFLIP: SVCodeDef = {
   correctionTable: buildCorrectionTable(code3PhaseflipBase as SVCodeDef),
 };
 
-// --- Repetition-5 (bit-flip) --------------------------------------------------
-
-function makeRepetition(n: number, id: string, name: string, short: string): SVCodeDef {
-  const encoding: GateOp[] = [];
-  for (let t = 1; t < n; t++) encoding.push({ gate: 'CNOT', qubits: [0, t] });
-  const stabs: StabilizerDef[] = [];
-  for (let i = 0; i < n - 1; i++) {
-    const stab: Pauli[] = new Array(n).fill('I');
-    stab[i] = 'Z'; stab[i + 1] = 'Z';
-    stabs.push({ paulis: stab, label: `Z${i} Z${i + 1}`, type: 'Z' });
-  }
-  const logicalX: Pauli[] = new Array(n).fill('X');
-  const logicalZ: Pauli[] = new Array(n).fill('Z');
-  const base = {
-    id,
-    name,
-    short,
-    n,
-    k: 1,
-    d: n,
-    family: 'Repetition',
-    corrects: `floor(${n}/2) = ${(n - 1) / 2} bit-flip (X) errors`,
-    description:
-      `Generalized n-qubit repetition code encoding into alpha|0...0> + beta|1...1>. ` +
-      `A chain of n-1 parity checks plus majority voting corrects up to ${(n - 1) / 2} bit flips, ` +
-      `showing how the protected error fraction grows with code size.`,
-    logicalX,
-    logicalZ,
-    encoding,
-    decoding: reverseOps(encoding),
-    stabilizers: stabs,
-  };
-  return { ...base, correctionTable: buildCorrectionTable(base as SVCodeDef) } as SVCodeDef;
-}
-
-export const CODE_REP5: SVCodeDef = makeRepetition(5, 'code-rep5', '5-Qubit Repetition Code', '5-Qubit Repetition');
-
-// --- Shor 9-qubit code ---------------------------------------------------------
-
-const encShor: GateOp[] = [
-  { gate: 'CNOT', qubits: [0, 3], comment: 'split into 3 blocks' },
-  { gate: 'CNOT', qubits: [0, 6] },
-  { gate: 'H', qubits: [0], comment: 'inner phase encoding' },
-  { gate: 'H', qubits: [3] },
-  { gate: 'H', qubits: [6] },
-  { gate: 'CNOT', qubits: [0, 1], comment: 'grow GHZ blocks' },
-  { gate: 'CNOT', qubits: [0, 2] },
-  { gate: 'CNOT', qubits: [3, 4] },
-  { gate: 'CNOT', qubits: [3, 5] },
-  { gate: 'CNOT', qubits: [6, 7] },
-  { gate: 'CNOT', qubits: [6, 8] },
-];
-
-const shorStabs: StabilizerDef[] = [
-  { paulis: pauliStr('ZZIIIIIII'), label: 'Z0 Z1', type: 'Z' },
-  { paulis: pauliStr('IZZIIIIII'), label: 'Z1 Z2', type: 'Z' },
-  { paulis: pauliStr('IIIZZIIII'), label: 'Z3 Z4', type: 'Z' },
-  { paulis: pauliStr('IIIIZZIII'), label: 'Z4 Z5', type: 'Z' },
-  { paulis: pauliStr('IIIIIIZZI'), label: 'Z6 Z7', type: 'Z' },
-  { paulis: pauliStr('IIIIIIIZZ'), label: 'Z7 Z8', type: 'Z' },
-  { paulis: pauliStr('XXXXXXIII'), label: 'X0..X5', type: 'X' },
-  { paulis: pauliStr('IIIXXXXXX'), label: 'X3..X8', type: 'X' },
-];
-
-const codeShorBase = {
-  id: 'code-shor9',
-  name: 'Shor 9-Qubit Code',
-  short: 'Shor [[9,1,3]]',
-  n: 9,
-  k: 1,
-  d: 3,
-  family: 'Concatenated CSS',
-  corrects: '1 ARBITRARY single-qubit error (X, Y and Z)',
-  description:
-    'The first quantum error-correcting code (Shor, 1995). Concatenates phase-flip protection ' +
-    'on top of three bit-flip blocks, correcting any single-qubit error — both bit flips AND ' +
-    'phase flips — using 8 stabilizer generators arranged in a 3x3 block structure.',
-  logicalX: pauliStr('XIIXIIXII'), // X on qubits 0, 3, 6 (one per block)
-  logicalZ: pauliStr('ZZZIIIIII'),
-  encoding: encShor,
-  decoding: reverseOps(encShor),
-  stabilizers: shorStabs,
-};
-
-export const CODE_SHOR9: SVCodeDef = {
-  ...codeShorBase,
-  correctionTable: buildCorrectionTable(codeShorBase as SVCodeDef),
-} as SVCodeDef;
-
-// --- Steane 7-qubit code ---------------------------------------------------------
-
-const encSteane: GateOp[] = [
-  // Prepare Hamming superposition variables c0=q4, c1=q5, c2=q6
-  { gate: 'H', qubits: [4] },
-  { gate: 'H', qubits: [5] },
-  { gate: 'H', qubits: [6] },
-  // Copy c2 into q3 (auxiliary) BEFORE any contamination
-  { gate: 'CNOT', qubits: [6, 3], comment: 'copy c2' },
-  // Spread the PURE data bit d from q0 into all qubits FIRST
-  // (|1_L> = coset 1̅ + C2⊥; later gates build x(c) ⊕ d on every qubit)
-  { gate: 'CNOT', qubits: [0, 1] },
-  { gate: 'CNOT', qubits: [0, 2] },
-  { gate: 'CNOT', qubits: [0, 3] },
-  { gate: 'CNOT', qubits: [0, 4] },
-  { gate: 'CNOT', qubits: [0, 5] },
-  { gate: 'CNOT', qubits: [0, 6] },
-  // Row r0 = 1010101 from c0 (q4)
-  { gate: 'CNOT', qubits: [4, 0] },
-  { gate: 'CNOT', qubits: [4, 2] },
-  { gate: 'CNOT', qubits: [4, 6] },
-  // Row r1 = 0110011 from c1 (q5)
-  { gate: 'CNOT', qubits: [5, 1] },
-  { gate: 'CNOT', qubits: [5, 2] },
-  { gate: 'CNOT', qubits: [5, 6] },
-  // Finish row r2 = 0001111 using the CLEAN c2 copy in q3
-  { gate: 'CNOT', qubits: [3, 4] },
-  { gate: 'CNOT', qubits: [3, 5] },
-];
-
-const steaneStabs: StabilizerDef[] = [
-  { paulis: pauliStr('ZIZIZIZ'), label: 'Z0Z2Z4Z6', type: 'Z' },
-  { paulis: pauliStr('IZZIIZZ'), label: 'Z1Z2Z5Z6', type: 'Z' },
-  { paulis: pauliStr('IIIZZZZ'), label: 'Z3Z4Z5Z6', type: 'Z' },
-  { paulis: pauliStr('XIXIXIX'), label: 'X0X2X4X6', type: 'X' },
-  { paulis: pauliStr('IXXIIXX'), label: 'X1X2X5X6', type: 'X' },
-  { paulis: pauliStr('IIIXXXX'), label: 'X3X4X5X6', type: 'X' },
-];
-
-const codeSteaneBase = {
-  id: 'code-steane7',
-  name: 'Steane 7-Qubit Code',
-  short: 'Steane [[7,1,3]]',
-  n: 7,
-  k: 1,
-  d: 3,
-  family: 'CSS (Hamming [7,4])',
-  corrects: '1 ARBITRARY single-qubit error (X, Y and Z)',
-  description:
-    'Built from the classical [7,4,3] Hamming code via the CSS construction. Its X and Z ' +
-    'corrections decouple cleanly (classical Hamming decoding on each syndrome), making it ' +
-    'a favourite for fault-tolerant schemes and ion-trap demonstrations (lit. ref 8).',
-  logicalX: pauliStr('XXXXXXX'),
-  logicalZ: pauliStr('ZZZZZZZ'),
-  encoding: encSteane,
-  decoding: reverseOps(encSteane),
-  stabilizers: steaneStabs,
-};
-
-export const CODE_STEANE7: SVCodeDef = {
-  ...codeSteaneBase,
-  correctionTable: buildCorrectionTable(codeSteaneBase as SVCodeDef),
-};
-
-// --- 5-qubit perfect code (projection encoding) -----------------------------------
-
-const fiveQStabs: StabilizerDef[] = [
-  { paulis: pauliStr('XZZXI'), label: 'XZZXI', type: 'X' },
-  { paulis: pauliStr('IXZZX'), label: 'IXZZX', type: 'X' },
-  { paulis: pauliStr('XIXZZ'), label: 'XIXZZ', type: 'X' },
-  { paulis: pauliStr('ZXIXZ'), label: 'ZXIXZ', type: 'X' },
-];
-
-const code5QBase = {
-  id: 'code-5qubit',
-  name: 'Five-Qubit Perfect Code',
-  short: 'Perfect [[5,1,3]]',
-  n: 5,
-  k: 1,
-  d: 3,
-  family: 'Stabilizer (non-CSS)',
-  corrects: '1 ARBITRARY error with the MINIMUM number of qubits (5)',
-  description:
-    'The smallest possible code correcting an arbitrary single-qubit error — provably optimal ' +
-    '(quantum Hamming bound saturated). Non-CSS: each stabilizer mixes X and Z. Encoded here ' +
-    'by stabilizer projection; decoded by codespace readout of the logical amplitudes.',
-  logicalX: pauliStr('XXXXX'),
-  logicalZ: pauliStr('ZZZZZ'),
-  encoding: [] as GateOp[],
-  decoding: [] as GateOp[],
-  stabilizers: fiveQStabs,
-  projectionEncoding: true,
-};
-
-export const CODE_5QUBIT: SVCodeDef = {
-  ...code5QBase,
-  correctionTable: buildCorrectionTable(code5QBase as SVCodeDef),
-} as SVCodeDef;
-
-export const SV_CODES: SVCodeDef[] = [
-  CODE_3BITFLIP,
-  CODE_3PHASEFLIP,
-  CODE_REP5,
-  CODE_SHOR9,
-  CODE_STEANE7,
-  CODE_5QUBIT,
-];
+export const SV_CODES: SVCodeDef[] = [CODE_3BITFLIP, CODE_3PHASEFLIP];
 
 export function getSVCode(id: string): SVCodeDef {
   const c = SV_CODES.find((c) => c.id === id);
@@ -410,75 +228,151 @@ export function getSVCode(id: string): SVCodeDef {
 }
 
 // ---------------------------------------------------------------------------
-// Projection encoding (5-qubit code) + codespace readout decoding
+// The EXACT circuits from all_with_noise_prob.py (5 qubits + 3 classical bits)
 // ---------------------------------------------------------------------------
+// These mirror the Python file operation-by-operation, including the q3/q4
+// syndrome ancillas, the id-gate noise insertion point, mid-circuit measurement,
+// conditional (if_test) corrections and the decode + final measurement.
 
-/**
- * Encode |psi>|0...0> into the codespace by sequentially projecting onto each
- * stabilizer's +1 eigenspace (deterministic, exact):
- *   psi' = (psi + S psi) / sqrt(2(1+<S>))
- * The result equals P_code |psi>|0...0> up to normalization — the true encoded state.
- */
-export function projectionEncode(code: SVCodeDef, sv: StateVector) {
-  for (const st of code.stabilizers) {
-    const s = sv.expectPauli(st.paulis);
-    const denom = Math.sqrt(2 * (1 + s));
-    if (denom < 1e-9) {
-      throw new Error('Projection encoding failed: state has no overlap with the +1 eigenspace');
-    }
-    const svS = sv.clone();
-    svS.applyPauliString(st.paulis);
-    const d = sv.data, sd = svS.data;
-    for (let i = 0; i < d.length; i++) d[i] = (d[i] + sd[i]) / denom;
-  }
+export type PyOp =
+  | { kind: 'gate'; gate: 'H' | 'X' | 'ID'; qubit: number; comment?: string }
+  | { kind: 'cnot'; control: number; target: number; comment?: string }
+  | { kind: 'measure'; qubit: number; clbit: number; comment?: string }
+  | {
+      kind: 'ifx';
+      /** value the classical register must equal for the X to fire (Python if_test) */
+      regValue: number;
+      /** syndrome bit string, e.g. '01' */
+      syndrome: string;
+      target: number;
+      comment?: string;
+    };
+
+export interface PythonCircuit {
+  title: string;
+  /** quantum wires (5) + classical wires (3) */
+  nQ: number;
+  nC: number;
+  ops: PyOp[];
+  /** stage boundaries for the labelled bands: [startOpIndex, label] */
+  stages: { at: number; label: string }[];
 }
 
-// cached |0_L>, |1_L> reference states for codespace readout decoding
-const readoutCache = new Map<string, { ref0: Float64Array; ref1: Float64Array; size: number }>();
+export function buildPythonCircuit(pythonType: 1 | 2, inputBit: 0 | 1, errorQubit: 0 | 1 | 2): PythonCircuit {
+  const ops: PyOp[] = [];
+  const stages: { at: number; label: string }[] = [];
+  const mark = (label: string) => stages.push({ at: ops.length, label });
 
-function getReadoutRefs(code: SVCodeDef) {
-  let cached = readoutCache.get(code.id);
-  if (!cached) {
-    const ref0 = new StateVector(code.n);
-    projectionEncode(code, ref0);
-    const ref1 = new StateVector(code.n);
-    ref1.prepareQubit0(Math.PI, 0); // |1>
-    projectionEncode(code, ref1);
-    cached = { ref0: ref0.data.slice(), ref1: ref1.data.slice(), size: ref0.size };
-    readoutCache.set(code.id, cached);
+  mark(inputBit === 1 ? '1. INPUT (X on q0)' : '1. INPUT |0⟩');
+  if (inputBit === 1) ops.push({ kind: 'gate', gate: 'X', qubit: 0, comment: 'input_bit = 1' });
+
+  if (pythonType === 1) {
+    mark('2. QEC ENCODING');
+    ops.push({ kind: 'cnot', control: 0, target: 1, comment: 'qc.cx(0,1)' });
+    ops.push({ kind: 'cnot', control: 0, target: 2, comment: 'qc.cx(0,2)' });
+
+    mark('3. NOISE INSERTION (id gate)');
+    ops.push({ kind: 'gate', gate: 'ID', qubit: errorQubit, comment: `qc.id(${errorQubit}) — noise attaches here` });
+
+    mark('4. SYNDROME DETECTION');
+    ops.push({ kind: 'cnot', control: 0, target: 3, comment: 'q3 checks q0,q1' });
+    ops.push({ kind: 'cnot', control: 1, target: 3 });
+    ops.push({ kind: 'cnot', control: 1, target: 4, comment: 'q4 checks q1,q2' });
+    ops.push({ kind: 'cnot', control: 2, target: 4 });
+
+    mark('5. MEASURE SYNDROME');
+    ops.push({ kind: 'measure', qubit: 3, clbit: 0, comment: 'qc.measure(3,0)' });
+    ops.push({ kind: 'measure', qubit: 4, clbit: 1, comment: 'qc.measure(4,1)' });
+
+    mark('6. ERROR CORRECTION (if_test)');
+    ops.push({ kind: 'ifx', regValue: 1, syndrome: '01', target: 0, comment: '01 -> q0 error' });
+    ops.push({ kind: 'ifx', regValue: 3, syndrome: '11', target: 1, comment: '11 -> q1 error' });
+    ops.push({ kind: 'ifx', regValue: 2, syndrome: '10', target: 2, comment: '10 -> q2 error' });
+
+    mark('7. DECODE');
+    ops.push({ kind: 'cnot', control: 0, target: 1, comment: 'qc.cx(0,1)' });
+    ops.push({ kind: 'cnot', control: 0, target: 2, comment: 'qc.cx(0,2)' });
+
+    mark('8. FINAL MEASUREMENT');
+    ops.push({ kind: 'measure', qubit: 0, clbit: 2, comment: 'qc.measure(0,2)' });
+  } else {
+    mark('2. CONVERT TO PHASE BASIS');
+    ops.push({ kind: 'gate', gate: 'H', qubit: 0, comment: 'qc.h(0)' });
+
+    mark('3. QEC ENCODING');
+    ops.push({ kind: 'cnot', control: 0, target: 1, comment: 'qc.cx(0,1)' });
+    ops.push({ kind: 'cnot', control: 0, target: 2, comment: 'qc.cx(0,2)' });
+    ops.push({ kind: 'gate', gate: 'H', qubit: 0, comment: 'convert encoded state' });
+    ops.push({ kind: 'gate', gate: 'H', qubit: 1, comment: 'to phase basis' });
+    ops.push({ kind: 'gate', gate: 'H', qubit: 2 });
+
+    mark('4. NOISE INSERTION (id gate)');
+    ops.push({ kind: 'gate', gate: 'ID', qubit: errorQubit, comment: `qc.id(${errorQubit}) — noise attaches here` });
+
+    mark('5. CONVERT BACK');
+    ops.push({ kind: 'gate', gate: 'H', qubit: 0 });
+    ops.push({ kind: 'gate', gate: 'H', qubit: 1 });
+    ops.push({ kind: 'gate', gate: 'H', qubit: 2 });
+
+    mark('6. SYNDROME DETECTION');
+    ops.push({ kind: 'cnot', control: 0, target: 3, comment: 'q3 checks q0,q1' });
+    ops.push({ kind: 'cnot', control: 1, target: 3 });
+    ops.push({ kind: 'cnot', control: 1, target: 4, comment: 'q4 checks q1,q2' });
+    ops.push({ kind: 'cnot', control: 2, target: 4 });
+
+    mark('7. MEASURE SYNDROME');
+    ops.push({ kind: 'measure', qubit: 3, clbit: 0, comment: 'qc.measure(3,0)' });
+    ops.push({ kind: 'measure', qubit: 4, clbit: 1, comment: 'qc.measure(4,1)' });
+
+    mark('8. ERROR CORRECTION (if_test)');
+    ops.push({ kind: 'ifx', regValue: 1, syndrome: '01', target: 0, comment: '01 -> q0 error' });
+    ops.push({ kind: 'ifx', regValue: 3, syndrome: '11', target: 1, comment: '11 -> q1 error' });
+    ops.push({ kind: 'ifx', regValue: 2, syndrome: '10', target: 2, comment: '10 -> q2 error' });
+
+    mark('9. DECODE');
+    ops.push({ kind: 'cnot', control: 0, target: 2, comment: 'qc.cx(0,2)' });
+    ops.push({ kind: 'cnot', control: 0, target: 1, comment: 'qc.cx(0,1)' });
+
+    mark('10. RETURN TO ORIGINAL BASIS');
+    ops.push({ kind: 'gate', gate: 'H', qubit: 0, comment: 'qc.h(0)' });
+
+    mark('11. FINAL MEASUREMENT');
+    ops.push({ kind: 'measure', qubit: 0, clbit: 2, comment: 'qc.measure(0,2)' });
   }
-  return cached;
-}
 
-/**
- * Decode via codespace readout: project the (already corrected) state onto
- * |0_L> and |1_L> reference states to obtain the logical 1-qubit density matrix.
- */
-export function codespaceReadout(code: SVCodeDef, sv: StateVector): number[] {
-  const { ref0, ref1 } = getReadoutRefs(code);
-
-  const inner = (ref: Float64Array) => {
-    let re = 0, im = 0;
-    for (let i = 0; i < sv.size; i++) {
-      const rr = ref[2 * i], ri = ref[2 * i + 1];
-      const pr = sv.data[2 * i], pi = sv.data[2 * i + 1];
-      // conj(ref) * psi
-      re += rr * pr + ri * pi;
-      im += rr * pi - ri * pr;
-    }
-    return { re, im };
+  return {
+    title: pythonType === 1 ? 'bit_flip_qec(input_bit, error_qubit)' : 'phase_flip_qec(input_bit, error_qubit)',
+    nQ: 5,
+    nC: 3,
+    ops,
+    stages,
   };
+}
 
-  const a = inner(ref0); // <0_L|psi>
-  const b = inner(ref1); // <1_L|psi>
-  const rho = new Float64Array(8);
-  rho[0] = a.re * a.re + a.im * a.im;
-  rho[6] = b.re * b.re + b.im * b.im;
-  rho[2] = a.re * b.re + a.im * b.im;              // a * conj(b), real part
-  rho[3] = a.im * b.re - a.re * b.im;              // imaginary part
-  rho[4] = rho[2];
-  rho[5] = -rho[3];
-  return Array.from(rho);
+/** The Python file's QEC STATUS selection logic (verbatim wording). */
+export function pythonQecStatus(noiseType: 1 | 2 | 3, qecType: 1 | 2): { status: 'MATCHED' | 'DEPOLARIZING' | 'NOT MATCHED'; lines: string[] } {
+  if (noiseType === 1 && qecType === 1) {
+    return {
+      status: 'MATCHED',
+      lines: ['Bit-flip noise is being tested', 'using the 3-qubit Bit-Flip QEC.'],
+    };
+  }
+  if (noiseType === 2 && qecType === 2) {
+    return {
+      status: 'MATCHED',
+      lines: ['Phase-flip noise is being tested', 'using the 3-qubit Phase-Flip QEC.'],
+    };
+  }
+  if (noiseType === 3) {
+    return {
+      status: 'DEPOLARIZING',
+      lines: ['Depolarizing noise is being tested', 'with the selected QEC code.'],
+    };
+  }
+  return {
+    status: 'NOT MATCHED',
+    lines: ['The selected QEC code is not', 'specifically matched to this noise.'],
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -518,11 +412,7 @@ export function runShot(code: SVCodeDef, opts: ShotOptions, rng: RNG): ShotResul
   sv.prepareQubit0(opts.theta, opts.phi);
 
   // encode
-  if (code.projectionEncoding) {
-    projectionEncode(code, sv);
-  } else {
-    for (const op of code.encoding) sv.applyGateOp(op.gate, op.qubits, op.param);
-  }
+  for (const op of code.encoding) sv.applyGateOp(op.gate, op.qubits, op.param);
 
   // noise
   let noiseEvents: NoiseEvent[] = [];
@@ -556,14 +446,9 @@ export function runShot(code: SVCodeDef, opts: ShotOptions, rng: RNG): ShotResul
     for (const q of correction.z) sv.applyGate1(q, GATES.Z);
   }
 
-  // decode
-  let rho: number[];
-  if (code.projectionEncoding) {
-    rho = codespaceReadout(code, sv);
-  } else {
-    for (const op of code.decoding) sv.applyGateOp(op.gate, op.qubits, op.param);
-    rho = sv.partialTraceQ0();
-  }
+  // decode (inverse encoding circuit) + logical readout
+  for (const op of code.decoding) sv.applyGateOp(op.gate, op.qubits, op.param);
+  const rho = sv.partialTraceQ0();
 
   return {
     fidelity: fidelityFromRho(rho, opts.theta, opts.phi),

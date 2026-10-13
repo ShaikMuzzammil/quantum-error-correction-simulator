@@ -30,7 +30,7 @@ const HOWTO = [
   {
     icon: Orbit,
     title: 'Watch it in 3D',
-    body: '3D Quantum Lab → 4 live sims. Press Run — each plays once, then stops. Drag to orbit.',
+    body: '3D Quantum Lab → press Run — plays once, then stops. Drag to orbit.',
     tab: 'lab3d',
   },
   {
@@ -99,8 +99,8 @@ const GLOSSARY: [string, string][] = [
   ['Coherent error', 'A systematic unitary mistake (e.g. every gate over-rotates 3°) — accumulates faster than random noise.'],
   ['Code [[n,k,d]]', 'Encodes k logical qubits into n physical qubits with distance d — fixes ⌊(d−1)/2⌋ errors.'],
   ['Stabilizer / Syndrome', 'Parity checks that all valid code states satisfy. The pattern of their answers (the syndrome) points to the error like a smoke alarm.'],
-  ['Decoder / MWPM', 'Translates syndrome → correction. Surface codes use minimum-weight perfect matching: pair defects along lightest paths.'],
-  ['Surface code', 'Qubits on a 2-D lattice with nearest-neighbour checks — the leading hardware candidate (threshold ≈ 1%).'],
+  ['Decoder', 'Translates the syndrome into a correction. Our two codes use the Python mapping: 01 → fix q0, 11 → fix q1, 10 → fix q2.'],
+  ['Repetition code', 'The family both our codes belong to: copy the qubit several times and use majority voting / parity checks to outvote a single error.'],
   ['Logical vs physical qubit', 'Physical = noisy hardware qubits; logical = the protected qubit they jointly implement.'],
   ['Fidelity F', 'How close the recovered state is to the target. 100% = identical. The headline score of every lab here.'],
   ['Pseudo-threshold', 'The noise level where QEC stops helping: below it bigger codes win, above it they lose.'],
@@ -109,9 +109,9 @@ const GLOSSARY: [string, string][] = [
 const FAQ: [string, string][] = [
   ['Why can\'t we just copy quantum data as a backup?', 'The no-cloning theorem forbids copying unknown quantum states. QEC sidesteps this by spreading information across entangled qubits — never copying it.'],
   ['What does "99% fidelity" mean?', 'The recovered state overlaps the intended state to 99% — measurements on it match the perfect state 99% of the time. The remaining 1% is genuine quantum damage.'],
-  ['More qubits make things LESS noisy?', 'That\'s the magic: extra qubits add error surface, but the code turns single errors into detectable patterns. Below threshold, detection wins — d=7 fails exponentially less than d=3.'],
-  ['A shot said "partial recovery" — is it broken?', 'No — honest physics. Pauli codes perfectly reverse Pauli errors; non-Pauli channels (damping, coherent tilt) also squeeze the state in ways a Pauli fix can\'t fully undo.'],
-  ['Is this how real quantum computers do it?', 'Yes — the encode → syndrome → correct loop is the real playbook (Google\'s Willow demonstrated exactly this surface-code scaling). The decoders differ; the principle is the same.'],
+  ['More qubits make things LESS noisy?', 'That\'s the magic: extra qubits add error surface, but the code turns single errors into detectable patterns. Below the pseudo-threshold, detection wins — the 3-qubit code fails only when 2+ errors land in one block (≈ 3p² at small p).'],
+  ['A shot said "imperfect recovery" — is it broken?', 'No — honest physics. One error is always fixed perfectly; imperfect recovery means SEVERAL errors hit the same block, which a distance-3 code cannot fully undo (the decoder picks the nearest single-error match).'],
+  ['Is this how real quantum computers do it?', 'Yes — the encode → syndrome → correct loop is the real playbook used on today\'s quantum hardware. The codes and decoders scale up; the principle is exactly what our two codes demonstrate.'],
 ];
 
 export default function Learn({ onNavigate }: { onNavigate?: (tab: string) => void }) {
@@ -137,7 +137,7 @@ export default function Learn({ onNavigate }: { onNavigate?: (tab: string) => vo
             <button
               key={s.title}
               onClick={() => onNavigate?.(s.tab)}
-              className="group flex items-start gap-2.5 rounded-lg border glass border-white/8/80 p-3 text-left transition-colors hover:border-amber-500/40"
+              className="group flex items-start gap-2.5 rounded-lg border border-violet-500/15 bg-[#141126]/80 p-3 text-left transition-colors hover:border-amber-500/40"
             >
               <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-amber-500/20 font-mono text-[11px] font-bold text-amber-300">{i + 1}</span>
               <span className="min-w-0">
@@ -162,7 +162,7 @@ export default function Learn({ onNavigate }: { onNavigate?: (tab: string) => vo
             <button
               key={c.title}
               onClick={() => onNavigate?.(c.tab)}
-              className="flex items-start gap-3 rounded-xl border glass border-white/8 p-4 text-left transition-colors hover:border-violet-500/50"
+              className="flex items-start gap-3 rounded-xl border border-violet-500/20 bg-[#141126] p-4 text-left transition-colors hover:border-violet-500/50"
             >
               <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-amber-500/15">
                 <c.icon className="h-4.5 w-4.5 text-amber-300" />
@@ -204,7 +204,7 @@ export default function Learn({ onNavigate }: { onNavigate?: (tab: string) => vo
       <section>
         <h2 className="mb-1 text-lg font-semibold text-slate-100">Glossary — the essential terms</h2>
         <p className="mb-3 text-sm text-slate-500">Tap any term for a one-sentence, jargon-free definition.</p>
-        <Accordion type="single" collapsible className="rounded-xl border glass border-white/8 px-5">
+        <Accordion type="single" collapsible className="rounded-xl border border-violet-500/20 bg-[#141126] px-5">
           {GLOSSARY.map(([term, def], i) => (
             <AccordionItem key={term} value={`g-${i}`} className="last:border-b-0">
               <AccordionTrigger className="py-3 text-left text-sm font-medium text-slate-200 hover:no-underline hover:text-violet-200">

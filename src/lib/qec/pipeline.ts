@@ -4,11 +4,10 @@
 
 import { makeRng, StateVector, RNG, GATES, blochFromRho } from './engine';
 import {
-  SVCodeDef, ShotOptions, runShot, projectionEncode, codespaceReadout,
+  SVCodeDef, ShotOptions, runShot,
   fidelityFromRho, lookupCorrection,
 } from './codes';
 import { NoiseModelId, NoiseParams, applyNoiseLayer, getNoiseModel } from './noise';
-import { surfaceMonteCarlo, SurfaceNoise } from './surface';
 
 // ---------------------------------------------------------------------------
 // Live multi-round simulation (powers the real-time 3D labs)
@@ -30,8 +29,7 @@ export interface LiveRoundResult {
 export function prepareEncodedState(code: SVCodeDef, theta: number, phi: number): StateVector {
   const sv = new StateVector(code.n);
   sv.prepareQubit0(theta, phi);
-  if (code.projectionEncoding) projectionEncode(code, sv);
-  else for (const op of code.encoding) sv.applyGateOp(op.gate, op.qubits, op.param);
+  for (const op of code.encoding) sv.applyGateOp(op.gate, op.qubits, op.param);
   return sv;
 }
 
@@ -69,14 +67,9 @@ export function runLiveRound(
     }
   }
 
-  let rho: number[];
-  if (code.projectionEncoding) {
-    rho = codespaceReadout(code, sv);
-  } else {
-    for (const op of code.decoding) sv.applyGateOp(op.gate, op.qubits, op.param);
-    rho = sv.partialTraceQ0();
-    for (const op of code.encoding) sv.applyGateOp(op.gate, op.qubits, op.param); // restore encoded state
-  }
+  for (const op of code.decoding) sv.applyGateOp(op.gate, op.qubits, op.param);
+  const rho = sv.partialTraceQ0();
+  for (const op of code.encoding) sv.applyGateOp(op.gate, op.qubits, op.param); // restore encoded state
 
   return {
     bloch: blochFromRho(rho),
@@ -87,6 +80,23 @@ export function runLiveRound(
     noiseEvents: events.map((e) => ({ kind: e.kind, qubit: e.qubit })),
     amplitudes: sv.topAmplitudes(0.008, 8),
   };
+}
+
+/**
+ * Non-destructive logical readout: decode a CLONE of the (possibly still
+ * encoded) state and return the logical qubit's Bloch vector + fidelity.
+ * Used by the 3D lab to show the logical state at every pipeline stage.
+ */
+export function readLogicalBloch(
+  code: SVCodeDef,
+  sv: StateVector,
+  theta: number,
+  phi: number
+): { bloch: { x: number; y: number; z: number }; fidelity: number } {
+  const clone = sv.clone();
+  for (const op of code.decoding) clone.applyGateOp(op.gate, op.qubits, op.param);
+  const rho = clone.partialTraceQ0();
+  return { bloch: blochFromRho(rho), fidelity: fidelityFromRho(rho, theta, phi) };
 }
 
 /** One noise round on a bare (unprotected) qubit — the comparison trajectory. */
@@ -240,80 +250,6 @@ export async function mcRunAsync(
   };
 }
 
-/** Partial running statistics streamed to the UI during a Monte Carlo run. */
-export interface PartialMC {
-  done: number;
-  total: number;
-  fidelityQEC: number;
-  fidelityBefore: number;
-  errorRateQEC: number;
-  errorRateBefore: number;
-  detectionRate: number;
-  correctionRate: number;
-  failCount: number;
-}
-
-/**
- * Streaming Monte Carlo (v5): identical physics to mcRun, but every chunk it
- * hands the CURRENT running averages to onPartial — so the UI can show the
- * estimates converging live while the simulation is still running.
- */
-export async function mcRunStreaming(
-  code: SVCodeDef,
-  noise: NoiseModelId,
-  params: NoiseParams,
-  theta: number,
-  phi: number,
-  shots: number,
-  seed: number,
-  pMeas: number,
-  onPartial: (s: PartialMC) => void,
-  chunkSize = 80
-): Promise<MCResult> {
-  const rng = makeRng(seed);
-  const accum = newAccum();
-  const t0 = Date.now();
-  let done = 0;
-  while (done < shots) {
-    const n = Math.min(chunkSize, shots - done);
-    for (let i = 0; i < n; i++) {
-      mcShot(code, { theta, phi, noise, params, pMeas }, rng, accum);
-    }
-    done += n;
-    const fQ = accum.fidelitySum / accum.shots;
-    const fB = accum.fidelityBeforeSum / accum.shots;
-    onPartial({
-      done: accum.shots,
-      total: shots,
-      fidelityQEC: fQ,
-      fidelityBefore: fB,
-      errorRateQEC: 1 - fQ,
-      errorRateBefore: 1 - fB,
-      detectionRate: accum.detectedCount / accum.shots,
-      correctionRate: accum.correctedCount / accum.shots,
-      failCount: accum.failCount,
-    });
-    await new Promise((r) => setTimeout(r, 0));
-  }
-  const elapsedMs = Date.now() - t0;
-  const fQ = accum.fidelitySum / accum.shots;
-  const fB = accum.fidelityBeforeSum / accum.shots;
-  const errQ = 1 - fQ;
-  const errB = 1 - fB;
-  return {
-    shots: accum.shots,
-    fidelityQEC: fQ,
-    fidelityBefore: fB,
-    errorRateQEC: errQ,
-    errorRateBefore: errB,
-    improvement: errQ > 1e-9 ? errB / errQ : errB > 1e-9 ? Infinity : 1,
-    detectionRate: accum.detectedCount / accum.shots,
-    correctionRate: accum.correctedCount / accum.shots,
-    failureRate: accum.failCount / accum.shots,
-    elapsedMs,
-  };
-}
-
 // ---------------------------------------------------------------------------
 // Sweeps
 // ---------------------------------------------------------------------------
@@ -356,27 +292,6 @@ export function sweepSV(
   return points;
 }
 
-export interface SurfaceSweepPoint {
-  p: number;
-  pLogical: number;
-  d: number;
-}
-
-export function sweepSurface(
-  d: number,
-  noise: SurfaceNoise,
-  shots: number,
-  seed: number,
-  pValues: number[]
-): SurfaceSweepPoint[] {
-  const points: SurfaceSweepPoint[] = [];
-  for (const p of pValues) {
-    const r = surfaceMonteCarlo(d, noise, p, shots, makeRng(seed + Math.floor(p * 100000)));
-    points.push({ p, pLogical: r.pLogical, d });
-  }
-  return points;
-}
-
 // ---------------------------------------------------------------------------
 // Single-shot trace for UI visualization (state-vector codes)
 // ---------------------------------------------------------------------------
@@ -403,7 +318,6 @@ export interface ShotTrace {
   recovered: boolean;
   measuredOutcome: 0 | 1;
   elapsedMs: number;
-  projectionEncoding: boolean;
   detectionNote: string;
 }
 
@@ -416,14 +330,11 @@ function stateLabel(theta: number, phi: number): string {
   return `cos(${(theta / 2).toFixed(2)})|0⟩ + e^(i${phi.toFixed(2)})·sin(${(theta / 2).toFixed(2)})|1⟩`;
 }
 
-function eventDetail(e: { kind: string; qubit: number; qubit2?: number; prob: number }, thetaDeg: number): string {
+function eventDetail(e: { kind: string; qubit: number; prob: number }): string {
   switch (e.kind) {
     case 'X': return `Pauli-X (bit flip) hit qubit ${e.qubit}`;
     case 'Y': return `Pauli-Y hit qubit ${e.qubit}`;
     case 'Z': return `Pauli-Z (phase flip) hit qubit ${e.qubit}`;
-    case 'AMP': return `Energy decay |1⟩→|0⟩ on qubit ${e.qubit} (p = ${e.prob.toFixed(3)})`;
-    case 'XX': return `Correlated XX crosstalk on qubits (${e.qubit}, ${e.qubit2})`;
-    case 'ROT': return `Systematic over-rotation Rx(${thetaDeg.toFixed(1)}°) on qubit ${e.qubit}`;
     default: return `Error on qubit ${e.qubit}`;
   }
 }
@@ -445,8 +356,7 @@ export function runTrace(
   const inputAmps = sv.topAmplitudes(1e-4, 2);
 
   // ---- encoding
-  if (code.projectionEncoding) projectionEncode(code, sv);
-  else for (const op of code.encoding) sv.applyGateOp(op.gate, op.qubits, op.param);
+  for (const op of code.encoding) sv.applyGateOp(op.gate, op.qubits, op.param);
   const encodedAmps = sv.topAmplitudes(0.01, 8);
 
   // ---- noise
@@ -476,13 +386,8 @@ export function runTrace(
   }
 
   // ---- decode + fidelity
-  let rho: number[];
-  if (code.projectionEncoding) {
-    rho = codespaceReadout(code, sv);
-  } else {
-    for (const op of code.decoding) sv.applyGateOp(op.gate, op.qubits, op.param);
-    rho = sv.partialTraceQ0();
-  }
+  for (const op of code.decoding) sv.applyGateOp(op.gate, op.qubits, op.param);
+  const rho = sv.partialTraceQ0();
   const fidelity = fidelityFromRho(rho, theta, phi);
 
   // ---- bare-qubit baseline
@@ -506,7 +411,6 @@ export function runTrace(
 
   const recovered = fidelity > 0.999;
   const info = getNoiseModel(noise);
-  const thetaDeg = ((params.theta ?? 0) * 180) / Math.PI;
 
   const anyDefect = syndromeBits.some((b) => b === 1);
   const detectionNote = anyDefect
@@ -527,7 +431,7 @@ export function runTrace(
     inputAmps,
     encodedAmps,
     afterNoiseAmps,
-    noiseEvents: events.map((e) => ({ ...e, detail: eventDetail(e, thetaDeg) })),
+    noiseEvents: events.map((e) => ({ ...e, detail: eventDetail(e) })),
     syndrome,
     correction,
     decodedBloch: blochFromRho(rho),
@@ -537,7 +441,6 @@ export function runTrace(
     recovered,
     measuredOutcome,
     elapsedMs: Date.now() - t0,
-    projectionEncoding: !!code.projectionEncoding,
     detectionNote,
   };
 }

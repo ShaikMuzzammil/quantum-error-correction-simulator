@@ -1,253 +1,104 @@
-# QEC Simulator — Interactive Quantum Error Correction Simulator
+# QEC Simulator — Focused Edition (v8)
 
-**Phase 2 Prototype · v6.0 — “Aurora × 4D Lab Edition”**
+**Interactive Quantum Error Correction Simulator — built exactly around our reference program `all_with_noise_prob.py`.**
 
-A fully interactive, **100% client-side** Quantum Error Correction simulator web application.
-It implements every objective of the Phase-1 proposal — multi-model noise simulation, before/after
-performance comparison, and configurable QEC experimentation — and extends it with **3D/4D
-visualizers**, large-scale Monte Carlo runs (up to 100,000 shots), **one-click exportable reports**
-(printable PDF, JSON, CSV), and a complete **understanding layer**: every input is explained in
-plain language (always on — no mode switch), every result is decomposed into *Results / How it was
-computed / What it means* tabs, and a compact **Learn tab** teaches the physics from zero.
+College project · **AMRITA VISHWA VIDYAPEETHAM**
+Team: K. Devendra Reddy (CH.SC.U4CSE24021) · Shaik Muzzammil (CH.SC.U4CSE24041) · D. Guna Samhith (CH.SC.U4CSE24016)
 
-New in v6: the **3D Quantum Lab is rebuilt and now has FOUR live simulators**. Bloch Flight 4D
-gains a glowing target pin, a richer live-fidelity chart and gentle idle-orbit; State Cityscape 3D
-is now a real 3-D **city** — one shaded tower per basis state on a proper street grid, up to **32
-live towers** with 5-qubit codes; Spacetime Lattice 4D gets a connected time axis, translucent floor
-panels and support for **d = 9 and 16 rounds**; and the all-new **Threshold Terrain 4D** runs
-**2,500+ complete surface-code experiments live in your browser** and grows a 3-D terrain of
-measured logical error rates — the famous surface-code threshold, measured in front of you.
-Every simulation is still a one-shot run that plays through and stops — nothing loops in the background.
+---
 
-| | |
+## What this prototype is
+
+This prototype implements **exactly** the scope of our reference implementation `all_with_noise_prob.py` (Qiskit + Qiskit Aer) — **2 QEC codes × 3 noise models, nothing more** — and every number on every tab is computed live in your browser by a verified state-vector engine:
+
+| Reference program (Python) | This prototype (browser) |
 |---|---|
-| **Team** | K. Devendra Reddy (CH.SC.U4CSE24021) · Shaik Muzzammil (CH.SC.U4CSE24041) · D. Guna Samhith (CH.SC.U4CSE24016) |
-| **Institution** | Dept. of CSE · Sri Chandrasekharendra Saraswathi Viswa Mahavidyalaya |
-| **Stack** | Next.js 16 (App Router) · React 19 · TypeScript 5 · Tailwind CSS 4 · shadcn/ui · Recharts · custom Canvas-3D engine |
-| **Backend required** | **None** — the entire quantum engine runs in the browser at ~10⁴–10⁵ shots/s |
+| `bit_flip_qec(input_bit, error_qubit)` | Simulator Lab → **3-Qubit Bit-Flip Code** [[3,1,3]] |
+| `phase_flip_qec(input_bit, error_qubit)` | Simulator Lab → **3-Qubit Phase-Flip Code** [[3,1,3]] |
+| `build_noise_model` — 1. Bit-Flip (X) / 2. Phase-Flip (Z) / 3. Depolarizing, attached to the **ID gate** | Same three channels (Python type numbers shown in the UI) |
+| `AerSimulator(noise_model=...).run(qc, shots=1000)` | Monte Carlo up to 25,000 shots, seeded and reproducible |
+| counts → interpretation → performance analysis → syndrome table → circuit | The same outputs, plus printable PDF/JSON/CSV exports |
 
----
+The **QEC STATUS** verdict is reproduced with the Python program's exact wording: `MATCHED`, `NOT MATCHED` or `DEPOLARIZING`.
 
-## 🆕 What's new in v6 (the 4D Lab rebuild)
+### The exact Python circuits, in the app
 
-- **Bloch Flight 4D v6** — glowing **target pin** showing exactly where QEC tries to hold the state,
-  a larger live-fidelity chart with a 50% fail-line and axis labels, an on-canvas round counter,
-  brighter sphere and trails, and a gentle idle orbit so the scene is never a dead still image.
-- **State Cityscape 3D v6** — rebuilt as a true city: towers sit on a proper street grid (not a
-  single line), each tower is a **per-face shaded 3-D box** with a glowing cap, height now means
-  **probability** (with % labels), codespace towers wear cyan rings, and the lab supports 8-tower
-  3-qubit codes **and 32-tower 5-qubit codes** (repetition-5 and the perfect [[5,1,3]]).
-- **Spacetime Lattice 4D v6** — the time axis is now **connected to the lattice** (a proper arrow
-  with t = 0…T ticks), every round is a translucent floor panel, errors glow, defects are 8-point
-  stars, error worldlines thread through the stack, and scale grew to **d = 9** (81 data qubits) ×
-  **16 rounds**.
-- **Threshold Terrain 4D (new simulator)** — large-scale Monte Carlo: for every (noise p, distance
-  d) pair it runs a full grid of complete surface-code experiments (default 21 cells × 120 shots =
-  **2,520 experiments**, adjustable up to 6,300) with a 12 ms-per-frame time slicer so the UI stays
-  smooth, and renders the resulting logical-error-rate terrain live in 3-D. A verdict line reports
-  the measured **threshold estimate**. Report + JSON exports include the full rate table.
-- **Plain-language pass** — every 3D-lab explanation, reading hint and “Try this” rewritten in
-  short, simple sentences; nothing about the physics was simplified away.
-- Engine untouched: **125/125 verification tests still pass**; all physics guarantees preserved.
+The Simulator Lab renders the **real 5-qubit + 3-classical-bit circuits** of the Python file — input X, encoding CX ladder, the **ID-gate noise insertion point**, q3/q4 syndrome detection, mid-circuit measurement, the conditional `if_test` corrections (01→q0, 11→q1, 10→q2), the decode step and the final measurement — and the printable PDF report embeds the same diagram.
 
-<details>
-<summary><b>What was new in v5</b> (click to expand)</summary>
+### The physics (verified, not decorative)
 
-- **Aurora-glass UI, top to bottom**: layered aurora backdrop, frosted-glass cards, gradient hero
-  typography, shimmer primary buttons, animated tab bar across all seven tabs.
-- **Live pipeline playback (Simulator Lab)**: after every Run Shot a pipeline rail plays the six
-  stages — Encode, Noise, Syndrome, Correct, Decode, Measure — one at a time, then rests at
-  “complete”. A Replay button re-runs the animation any time. It always stops.
-- **Streaming Monte Carlo (Performance Lab)**: estimates converge LIVE while the simulation runs.
-- **Code Showdown (Performance Lab)**: one click races **all 9 codes** under identical noise and
-  ranks them by improvement factor with a live-growing chart and full statistics table.
+The engine is covered by a 100-assertion suite (`bun run scripts/test-qec.mjs`):
 
-</details>
+- **Matched pairs recover perfectly**: bit-flip code + X noise and phase-flip code + Z noise fix every single error (F = 1 after correction).
+- **Monte Carlo matches theory**: bit-flip code success = (1−p)³ + 3p(1−p)² — the simulation lands on the analytic curve at every p.
+- **Unmatched pairings behave honestly**: Z noise is invisible to the bit-flip code (no harm, no help); an X error on the phase-flip code is an undetectable logical flip.
+- **Noise channels sampled correctly**: bit-flip/phase-flip event rates match p; depolarizing picks X/Y/Z uniformly.
 
-<details>
-<summary><b>What was new in v4</b> (click to expand)</summary>
+## The seven tabs
 
-- One-shot simulations everywhere: the three 3D/4D visualizers run a bounded experiment, then halt
-  with “complete — simulation stopped”; the render loop fully halts when idle (zero idle CPU).
-- Guide Mode toggle removed — all input hints and ? explainers are always on.
-- Compact navigation: 9 tabs → 7 (Codes + Noise + Literature unified in one Reference tab).
-- Rebuilt compact Learn page; how-to cards start collapsed; static ambient background.
+1. **Overview** — hero, Phase-1 objectives → implemented features, an interactive worked example (the exact Phase-1 scenario: X error on q1, live engine run) and the pipeline architecture.
+2. **Simulator Lab** — the full single-shot pipeline: code + noise + p + input state + manual error injection + seed → verdict with QEC STATUS, encoding circuit with error/correction markers, the exact Python circuit card, syndrome table with the Python mapping, Bloch-sphere comparison (QEC vs bare), state inspector. Exports: **PDF report (with the circuit diagram)**, JSON, CSV.
+3. **3D Quantum Lab** — four real-time visualizers, all one-shot (press Run → play N rounds → stop), all engine-driven:
+   - **Bloch Flight 4D** — the logical qubit flying through noise + correction rounds, time-colored trail + bare-qubit ghost.
+   - **State Cityscape 3D** — live amplitude landscape of the encoded block.
+   - **Syndrome Spacetime 4D** — the bit-flip code's data wires and syndrome checks stacked over correction rounds (noise hits, defects, corrections, failure floors).
+   - **Bloch Sphere 3D** — interactive pipeline walkthrough: input → encoded → after noise → syndrome → corrected → decoded, stage by stage.
+4. **Performance Lab** — Monte Carlo before/after (up to 25,000 shots) + the fidelity-vs-p sweep (1%→50%) exposing each code's pseudo-threshold. Exports: PDF report, JSON, CSV.
+5. **Learn** — compact crash course: how to use the simulator, six core ideas, the QEC loop, glossary, FAQ.
+6. **Reference** — the two QEC codes (with encoding circuits + stabilizers), the three noise models, and the 10-paper Phase-1 literature review.
+7. **About** — college, team, engine highlights, tech stack, what's new.
 
-</details>
+## Tech stack
 
-<details>
-<summary><b>What was new in v3</b> (click to expand)</summary>
+- Next.js 16 (App Router) + React 19 + TypeScript
+- Tailwind CSS 4 + shadcn/ui
+- Recharts for statistics; custom SVG for circuits / Bloch spheres; custom zero-dependency Canvas 3D engine (`three-d.ts`)
+- From-scratch state-vector engine (`engine.ts`) with projective stabilizer measurement + quantum-trajectory noise sampling
+- Reference program: Qiskit + Qiskit Aer (`all_with_noise_prob.py`, included in the project zip)
 
-- Guide system: ? explainers on every input, Results / How-computed / What-it-means tabs on every
-  result, “How to read this” panels on the 3D/4D visualizers.
-- Learn tab crash course, glossary and FAQ; parameter correctness fixes (coherent rotation angle
-  slider, real T₁/T₂ sliders for thermal relaxation).
-
-</details>
-
----
-
-## ✨ Features
-
-### Simulators (all live, all real physics)
-
-| Lab | What it does |
-|---|---|
-| **Overview** | Phase-1 objectives → feature mapping, plus an interactive worked example (3-qubit bit-flip code, exactly the PPT architecture scenario) executed by the real engine. |
-| **Simulator Lab** | Single-shot pipeline runs: encode → noise → syndrome → correction → decode → measure. Choose any of 9 code configurations × 8 noise models, pick the input state \|ψ⟩ (presets or custom θ/φ), set the RNG seed, or toggle **manual error injection** (I → X → Z → Y per qubit / click lattice cells). Full circuit diagram, syndrome table, state inspector and Bloch comparison — every input guided, every result explained in three tabs. |
-| **3D Quantum Lab** | **Four** visualizers with orbit/zoom cameras, **all one-shot runs**: **Bloch Flight 4D** (logical qubit trajectory with a time-colored trail, target pin and live-fidelity chart), **State Cityscape 3D** (a live 3-D city of amplitudes — 8 to 32 shaded towers on a street grid), **Spacetime Lattice 4D** (surface code: d×d space × up to 16 syndrome rounds of time, defect stars, MWPM matching chains in spacetime, d up to 9), and **Threshold Terrain 4D** (2,500+ live Monte Carlo experiments building the surface-code threshold map in 3-D). |
-| **Performance Lab** | Monte Carlo before/after statistics and noise sweeps. Surface codes reproduce the famous **threshold chart** (logical error rate vs p for d = 3/5/7). Up to 25,000 shots (state-vector) / 100,000 shots (surface) per run — with interpretation tabs that explain the improvement factor and the threshold in plain language. |
-| **Learn** | The compact understanding layer: small 4-step how-to box, six core ideas, the QEC loop, 16-term glossary, honest FAQ — everything cross-linked to the labs. |
-| **Reference** | QEC code explorer (circuits, stabilizers, logical operators), the 8-channel noise library, and the 10-paper Phase-1 literature review — one tab, three chips. |
-| **About** | Engine notes, technology stack, v5 changelog and the project team. |
-
-### Codes
-
-`[[3,1,3]]` bit-flip · `[[3,1,3]]` phase-flip · 5-qubit repetition · **Shor `[[9,1,3]]`** · **Steane `[[7,1,3]]`** · perfect **`[[5,1,3]]`** · rotated **surface codes d = 3/5/7** (exact MWPM decoder).
-
-### Noise models
-
-Bit-flip (X) · Phase-flip (Z) · Depolarizing · Amplitude damping · Phase damping · Thermal relaxation (T₁/T₂) · Coherent over-rotation · Crosstalk (correlated XX). Non-Pauli channels use exact quantum-trajectory sampling.
-
-### Exportable reports (everywhere)
-
-Every lab can export:
-
-- **Report (PDF)** — a formal, print-ready document with *Inputs*, *Outputs*, result cards, data tables
-  and a methodology section. Opens in a new tab and raises the print dialog — choose **Save as PDF**.
-- **JSON** — the full machine-readable inputs + outputs (for reproducibility / further analysis).
-- **CSV** — per-point data (sweeps, trajectories, amplitudes) for Excel / Python / MATLAB.
-
----
-
-## 🚀 Run Locally
-
-### Prerequisites
-
-- **Node.js 18.18+** (20 LTS recommended) and npm — *or* — **Bun 1.0+**
-- Any modern browser (Chrome / Edge / Firefox / Safari). No backend, no database, no API keys.
-
-### Steps
+## Run locally
 
 ```bash
-# 1 — install dependencies
-npm install          # or: bun install
-
-# 2 — start the dev server
-npm run dev          # or: bun run dev
-
-# 3 — open the app
-# http://localhost:3000
+npm install
+npm run dev          # http://localhost:3000
 ```
 
-### Other scripts
+Production build:
 
-| Command | What it does |
-|---|---|
-| `npm run build` | Production build (`next build`) |
-| `npm start` | Serve the production build (`next start`) |
-| `npm run lint` | ESLint over the project |
-| `npm run test` | Runs the **125-test engine verification suite** (`bun scripts/test-qec.mjs`) |
-
-> The engine test suite validates the simulator against known theory: the 3-qubit code fidelity equals
-> `1 − P(≥2 errors)`, the surface-code logical rate matches the exact `18p²` small-p expansion for d=3,
-> and the d = 3/5/7 threshold ordering flips near ~10% noise.
-
----
-
-## 🗂 Project Structure
-
+```bash
+npm run build
+npm start
 ```
-qec-simulator/
-├── src/
-│   ├── app/
-│   │   ├── page.tsx              # shell: header, 7 tabs (incl. Reference), static backdrop, footer (team names)
-│   │   ├── layout.tsx            # metadata + dark theme
-│   │   └── globals.css
-│   ├── components/qec/
-│   │   ├── Guide.tsx             # always-on guide system: ?-explainers, GuideField, HowToCard, ResultTabs
-│   │   ├── Learn.tsx             # compact how-to box + six ideas + glossary + FAQ
-│   │   ├── Overview.tsx          # hero, objectives mapping, worked example (one-shot tour)
-│   │   ├── SimulatorLab.tsx      # single-shot pipeline + guided controls + explanation tabs
-│   │   ├── QuantumLab3D.tsx      # 3D lab shell + Bloch Flight 4D (one-shot run-then-stop)
-│   │   ├── Lab3DVisuals.tsx      # State Cityscape 3D + Spacetime Lattice 4D (one-shot runs)
-│   │   ├── three-d.ts            # reusable Canvas-3D engine (orbit camera, demand-driven rendering)
-│   │   ├── PerformanceLab.tsx    # Monte Carlo + sweeps + explanation tabs
-│   │   ├── Galleries.tsx         # codes / noise / literature / about (v5 feature map)
-│   │   ├── CircuitDiagram.tsx    # SVG circuit renderer
-│   │   ├── SurfaceGrid.tsx       # lattice renderer (click-to-inject)
-│   │   └── BlochSphere.tsx       # SVG Bloch sphere
-│   ├── lib/
-│   │   ├── report.ts             # PDF/JSON/CSV report generation
-│   │   └── qec/
-│   │       ├── engine.ts         # state-vector simulator (complex amplitudes, measurements)
-│   │       ├── noise.ts          # 8 noise channels (trajectory sampling) + param builder
-│   │       ├── codes.ts          # 6 state-vector QEC codes + auto correction tables
-│   │       ├── surface.ts        # rotated surface code + exact MWPM decoder
-│   │       ├── pipeline.ts       # single-shot traces, Monte Carlo, sweeps, live rounds
-│   │       └── registry.ts       # UI-facing registry
-│   └── components/ui/            # shadcn/ui primitives
-├── scripts/test-qec.mjs          # 125-test verification suite
-├── next.config.ts
-├── package.json
-└── README.md
+
+Engine tests (100 assertions):
+
+```bash
+bun scripts/test-qec.mjs
 ```
 
 ---
 
-## 🐙 Push to GitHub (step by step)
+## Deploy to Vercel (step by step, after a GitHub push)
 
-The project ships with a proper `.gitignore` (node_modules, `.next`, logs, env files are excluded),
-so the repository stays small and clean.
+### A. Push this project to GitHub
 
-### One-time setup (first push only)
+1. Create a new **empty** repository on GitHub (no README/license — avoids conflicts).
+2. In this project folder run:
 
-1. **Install Git** if you don't have it: https://git-scm.com/downloads (default options are fine).
-2. **Tell Git who you are** (once per computer):
+```bash
+git init
+git add .
+git commit -m "QEC Simulator — Focused Edition v8"
+git branch -M main
+git remote add origin https://github.com/<your-username>/<your-repo>.git
+git push -u origin main
+```
 
-   ```bash
-   git config --global user.name "Your Name"
-   git config --global user.email "you@example.com"
-   ```
+> If you had a previous `origin`, replace step 5 with
+> `git remote set-url origin https://github.com/<your-username>/<your-repo>.git`.
+> GitHub no longer accepts passwords — use a **Personal Access Token** (GitHub → Settings → Developer settings → Tokens) as the password, or log in via the browser popup.
 
-3. **Create an EMPTY repository on GitHub**:
-   - Go to **https://github.com/new** (sign in first).
-   - Repository name: `qec-simulator` (or anything you like).
-   - Keep it **Public** (Private also works with Vercel).
-   - **Do NOT** tick “Add a README”, “Add .gitignore” or “Choose a license” — we already ship them,
-     and ticking them causes a merge conflict on the first push.
-   - Click **Create repository** and copy the URL shown, e.g.
-     `https://github.com/<your-username>/qec-simulator.git`.
-
-4. **Open a terminal in the project folder** (the one containing this README, `package.json`, `src/`…)
-   and run:
-
-   ```bash
-   # 1 — initialise the repository
-   git init
-
-   # 2 — stage and commit everything
-   git add .
-   git commit -m "QEC Simulator v6.0 — 4D Lab Edition"
-
-   # 3 — rename the branch to main (GitHub's default)
-   git branch -M main
-
-   # 4 — connect your local folder to the GitHub repo
-   git remote add origin https://github.com/<your-username>/qec-simulator.git
-
-   # 5 — push
-   git push -u origin main
-   ```
-
-5. When asked for a password: GitHub no longer accepts account passwords — paste a
-   **Personal Access Token** (GitHub → Settings → Developer settings → Personal access tokens →
-   *Generate new token (classic)* → tick the `repo` scope), or set up the **GitHub CLI**
-   (`gh auth login`) / **SSH keys** once and never think about it again.
-
-6. Refresh your GitHub page — all the code is there. ✅
-
-### Every later update is just three commands
+To publish later updates, just:
 
 ```bash
 git add .
@@ -255,126 +106,77 @@ git commit -m "describe your change"
 git push
 ```
 
-> Tip: if you prefer SSH, use `git@github.com:<your-username>/qec-simulator.git` as the remote and
-> make sure your SSH key is added to GitHub (Settings → SSH and GPG keys).
->
-> No-terminal alternative: on the GitHub repo page choose **Add file → Upload files** and drag the
-> project files in — fine for a one-off, but Git is the proper workflow.
+### B. Deploy from the Vercel dashboard (recommended)
 
----
+1. Go to **vercel.com** → sign in **with GitHub**.
+2. **Add New… → Project** → pick the repository you just pushed.
+3. Vercel auto-detects **Next.js**. Leave every setting at its default:
+   - Framework preset: **Next.js** (filled automatically)
+   - Build command: `next build` (default)
+   - Output directory: `.next` (default)
+   - Install command: `npm install` (default)
+4. Click **Deploy** and wait ~1–2 minutes.
+5. Open the given URL (`https://<project-name>.vercel.app`) — the simulator runs fully client-side; **no database, no environment variables, nothing else to configure**.
 
-## ▲ Deploy to Vercel (step by step — GitHub → live site)
-
-The app is a standard **Next.js (App Router)** project — Vercel auto-detects everything. There are
-**no environment variables, no database and no serverless functions to configure**. The whole flow
-takes about 5 minutes.
-
-### Method A — Vercel Dashboard (recommended, right after the GitHub push above)
-
-1. **Sign in at https://vercel.com** — click **Continue with GitHub** (easiest; it also installs the
-   Vercel GitHub app used in step 3).
-2. On the dashboard click **Add New… → Project**.
-3. Find the `qec-simulator` repository you just pushed and click **Import**.
-   - Not listed? Click **Adjust GitHub App Permissions** → *Select repositories* → add
-     `qec-simulator` → Save, then refresh the page.
-4. On the **Configure Project** screen, leave everything at the defaults:
-
-   | Setting | Value to use |
-   |---|---|
-   | Framework Preset | **Next.js** (auto-detected) |
-   | Root Directory | `./` (leave as default) |
-   | Build Command | *leave empty* — Vercel runs `next build` |
-   | Output Directory | *leave empty* — Vercel uses `.next` |
-   | Install Command | *leave empty* — Vercel runs `npm install` (or detects bun/pnpm) |
-   | Node.js Version | 20.x (default) — anything ≥ 18.18 works |
-
-5. **Environment Variables:** leave the section **completely empty**. The app needs **none** —
-   all quantum simulation runs client-side in the visitor's browser; there are no API keys, no
-   database and no third-party services.
-6. Click **Deploy**. The first build takes ~1–2 minutes — you'll see the build log live.
-7. 🎉 Done — your simulator is live at `https://<project-name>.vercel.app`
-   (the URL is shown on the completion screen).
-8. **Automatic redeployments from now on:** every `git push` to `main` rebuilds and updates the live
-   site automatically; every pull request gets its own preview URL. You never touch Vercel again.
-
-### Method B — Vercel CLI (no dashboard clicking)
+### C. Or deploy with the Vercel CLI
 
 ```bash
-# 1 — install the CLI (once)
 npm i -g vercel
-
-# 2 — from the project root
-vercel login          # opens the browser to authenticate
-vercel                # links + deploys a preview (accept the default prompts)
-vercel --prod         # promotes that build to production
+vercel login
+vercel          # preview deployment
+vercel --prod   # production deployment
 ```
 
-### Verify the deployment worked
+### D. Verify the deployment
 
-- Open the `*.vercel.app` URL → the QEC Simulator header loads → open the **3D Quantum Lab** →
-  press **Run flight** on Bloch Flight 4D → the trail animates and stops with
-  “complete — simulation stopped”. Open **Threshold Terrain** → **Run experiment** → the terrain
-  grows bar by bar and ends with a threshold verdict.
-- Vercel Dashboard → your project → **Deployments** shows every build with status
-  (“Ready” = success) and the commit message that triggered it.
+- [ ] Overview loads with the gradient hero and the worked-example tour.
+- [ ] Simulator Lab → Run Shot (default) → "Quantum information recovered", **QEC STATUS: MATCHED**, fidelity 100%.
+- [ ] Simulator Lab → Manual Injection ON, q1 = X → Run Shot → syndrome flags, correction applied, bare qubit 0%.
+- [ ] 3D Quantum Lab → Run flight / Run city / Run spacetime / Run pipeline — each plays once and stops.
+- [ ] Performance Lab → Monte Carlo → ~3.59× fewer errors at p = 0.10; Sweep p draws the curves.
+- [ ] Export Report opens the print-ready PDF with the circuit diagram.
 
-### Custom domain (optional)
+### Troubleshooting
 
-Vercel Dashboard → your project → **Settings → Domains → Add** — then follow the DNS instructions
-(A/CNAME records at your registrar). HTTPS certificates are automatic.
-
-### Deploy troubleshooting
-
-| Symptom | Fix |
+| Problem | Fix |
 |---|---|
-| Build fails with a TypeScript error | The repo already sets `typescript.ignoreBuildErrors` in `next.config.ts`; make sure you pulled the latest version. Type errors never block this build. |
-| “No framework detected” | Set Framework Preset to **Next.js** manually in the project settings. |
-| “Command failed: npm install” | Delete `package-lock.json` / `bun.lock` from the repo, commit, push again — or set Install Command to `npm install --legacy-peer-deps`. |
-| Blank page after deploy | Hard-refresh (Ctrl/Cmd+Shift+R). The app is fully static client-side — there is no server state. |
-| 404 from GitHub App | Re-grant repo access: Vercel Dashboard → Settings → Git Integration. |
-| Want a standalone Node deploy instead of Vercel | `npm run build && npm start` serves on port 3000 from any Node 18.18+ host (Render, Railway, VPS, Docker). |
+| Build fails on Vercel with a type error | Run `npx tsc --noEmit` locally and fix, then push again. |
+| `npm install` fails | Delete `package-lock.json`, commit, push, redeploy. |
+| Wrong Node version | Vercel defaults to Node 20 — compatible; do not override. |
+| Page 404 after deploy | Make sure the repo root contains `package.json` (deploy the project folder, not a parent). |
+| You changed code but Vercel shows the old site | Vercel redeploys automatically on every `git push` — check the Deployments tab for the latest commit hash. |
 
 ---
 
-## 🔐 Environment Variables
+## What changed in this edition (v8)
 
-**None. Zero.** The simulator is deliberately 100% client-side:
+- **Scope = the Python file, exactly**: 2 QEC codes and 3 noise channels; every extra code/noise from earlier drafts was removed.
+- **Restored the compact 7-tab interface** with the worked-example Overview.
+- **Exact Python circuits** rendered in-app and embedded in the PDF reports.
+- **New 3D visualizers**: Bloch Sphere 3D (pipeline walkthrough) and Syndrome Spacetime 4D (bit-flip code over time) join Bloch Flight 4D and State Cityscape 3D.
+- **All simulations one-shot** — they play a fixed number of rounds/stages and stop.
+- **100-assertion engine suite**, lint-clean, production-build-verified, browser-tested end to end.
 
-- the quantum engine, decoders and Monte Carlo statistics are pure TypeScript running in the browser;
-- there is no database, no authentication, no external API and therefore no secrets;
-- works identically on `localhost`, GitHub Pages-style static hosts with a Node server, and Vercel.
+## Project structure
 
-If you later add analytics or a backend, put their keys in Vercel → Settings → Environment Variables
-and reference them with `process.env.NEXT_PUBLIC_*` for browser-side usage.
-
----
-
-## 🧠 Engine Notes
-
-- **State-vector backend** — full complex-amplitude simulation up to 9 data qubits (2⁹ = 512 amplitudes),
-  unitary circuits, projective Pauli measurements with optional readout error, partial trace, Bloch readout.
-- **Quantum trajectories** — non-Pauli channels (amplitude damping, thermal relaxation, coherent rotation,
-  crosstalk) are sampled per-shot, which is statistically exact for the reported observables.
-- **Pauli-frame backend** — surface codes run as cumulative multi-round Pauli frames with an
-  **exact minimum-weight perfect-matching decoder** (subset DP over defect pairings with an
-  unlimited-capacity boundary node, BFS shortest-path recovery).
-- **Correction tables** — auto-generated per code from single-error syndromes with an
-  invisible-error guard and nearest-syndrome fallback.
-- **Reproducibility** — every random process is driven by a seeded PRNG (mulberry32), and the seed is
-  part of every exported report.
-
-## 🖥 Browser Support
-
-Chrome / Edge / Firefox / Safari — current versions. The 3D lab uses Canvas 2D with a custom
-perspective engine (no WebGL requirement), pointer events for orbit, and `devicePixelRatio`-aware
-rendering for sharp visuals on any display.
-
-## 📄 License & Credits
-
-Built as the Phase-2 prototype of the academic project *“An Interactive Quantum Error Correction
-Simulator”*. Simulation engine, visualizations and reports were built from first principles for this
-project — no external quantum computing library is used.
-
-**K. Devendra Reddy · Shaik Muzzammil · D. Guna Samhith**
-Dept. of CSE · Sri Chandrasekharendra Saraswathi Viswa Mahavidyalaya
-"# quantum-error-correction-simulator" 
+```
+src/
+  app/page.tsx                  # 7-tab shell
+  lib/qec/engine.ts             # state-vector engine (gates, projective measurement, fidelity)
+  lib/qec/codes.ts              # the 2 QEC codes + exact Python circuit definitions
+  lib/qec/noise.ts              # the 3 noise channels (X / Z / depolarizing)
+  lib/qec/pipeline.ts           # single-shot traces, Monte Carlo, sweeps, live rounds
+  lib/qec/registry.ts           # UI-facing registry (codes × compatible noises)
+  lib/report.ts                 # printable report builder (embeds circuit SVG) + JSON/CSV
+  components/qec/
+    SimulatorLab.tsx            # single-shot pipeline + Python circuit + exports
+    PerformanceLab.tsx          # Monte Carlo + sweep + exports
+    QuantumLab3D.tsx            # 3D lab shell (4 visualizers)
+    Lab3DVisuals.tsx            # Cityscape + Syndrome Spacetime + Bloch Sphere 3D
+    PythonCircuit.tsx           # exact all_with_noise_prob.py circuit renderer
+    CircuitDiagram.tsx          # SVG circuit renderer with noise/correction markers
+    BlochSphere.tsx             # small SVG Bloch spheres
+    Overview / Learn / Galleries / Guide
+scripts/test-qec.mjs            # 100-assertion engine verification
+all_with_noise_prob.py          # the reference Qiskit program
+```
