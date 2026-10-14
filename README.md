@@ -85,3 +85,57 @@ Y = X and Z together, so both syndromes fire. Recovery uses one conditional per 
   because it exposes nine noisy qubits instead of one. The comparison panel reports this honestly.
 * Results are statistical: about +/-1 to 1.5 percentage points at 1000 shots.
 * This is not a fault-tolerance simulation (ancilla/gate noise is not modelled).
+
+## Deploy on Vercel (fixed build)
+
+The first deploy attempt failed with *"No Next.js version detected. Make sure
+your package.json has 'next'..."* because this project is a **Python (Flask +
+Qiskit)** app, not a Node/Next.js project, and the Vercel project was running
+the Next.js preset. The project now ships everything Vercel needs:
+
+| Added file | Purpose |
+|---|---|
+| `vercel.json` | Forces the **Flask** framework preset (`"framework": "flask"`), overriding the Next.js preset that caused the error, and raises the function time limit to 60 s for long sweeps |
+| `.python-version` | Pins Python 3.12 on Vercel (same as local) |
+| `public/static/...` | Static assets served from Vercel's CDN (Vercel's official Flask guide says to use `public/**` for static files) |
+| `.gitignore` | Keeps venvs, caches and generated `output/` files out of git |
+
+`qec_simulator.py` has one small change: on Vercel the Function filesystem is
+read-only except `/tmp`, so the CSV/PNG output folder automatically switches
+to `/tmp/qec_output` (the `VERCEL=1` environment variable is set by Vercel).
+Locally nothing changes — files still land in `output/`.
+
+### Deploy from GitHub (recommended)
+
+1. Push this project to GitHub. Keep `app.py`, `requirements.txt` and
+   `vercel.json` in the **repository root** (or set
+   *Settings → Build & Output → Root Directory* to the folder that contains
+   them if you keep the `quantum-qec-simulator/` wrapper folder).
+2. In Vercel: *Add New → Project → Import* the repository.
+3. Framework Preset shows **Flask** (forced by `vercel.json`); leave all other
+   settings as detected. No build command, no output directory needed.
+4. Deploy. First build takes a few minutes (Qiskit + Aer are large wheels).
+
+### Deploy with the Vercel CLI
+
+```powershell
+npm i -g vercel
+cd path\to\quantum-qec-simulator
+vercel          # preview deploy
+vercel --prod   # production deploy
+```
+
+### Notes and limits
+
+* Dependencies are ~300 MB installed (Qiskit + Aer + SciPy). This fits the
+  standard Python function limit (500 MB uncompressed) and the 5 GB Fluid
+  limit that new projects use by default. If an **older** Vercel project ever
+  reports a function-size error, add the environment variable
+  `VERCEL_SUPPORT_LARGE_FUNCTIONS=1` (*Settings → Environment Variables*) and
+  redeploy.
+* First request after inactivity has a cold start of a few seconds.
+* `output/` on Vercel is per-instance and temporary: the *Download CSV/PNG*
+  buttons work right after an experiment finishes, but saved files are not
+  permanent storage. Download them when you see them, or run locally for
+  permanent files.
+* The QEC simulation logic, circuits, API and pages are unchanged.

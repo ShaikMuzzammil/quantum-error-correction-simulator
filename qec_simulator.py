@@ -37,6 +37,7 @@ Your original phase-flip circuit is exactly the "X" basis version.
 """
 
 import csv
+import os
 import re
 import textwrap
 from datetime import datetime
@@ -81,7 +82,12 @@ NOISE_INFO = {
 _NOISE_ALIAS = {1: "bit_flip", 2: "phase_flip", 3: "depolarizing"}
 _CODE_ALIAS = {1: "bit_flip", 2: "phase_flip", 3: "shor"}
 
-OUTPUT_DIR = Path(__file__).resolve().parent / "output"
+# Local: CSV/PNG files go to output/ next to this file (unchanged behaviour).
+# Vercel: the Function filesystem is read-only except /tmp, so when the app
+# detects the Vercel environment the output folder is placed there instead.
+OUTPUT_DIR = (Path("/tmp/qec_output")
+              if os.environ.get("VERCEL") == "1"
+              else Path(__file__).resolve().parent / "output")
 
 SYNDROME_TABLE_3Q = [
     ("00", "No error"),
