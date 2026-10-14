@@ -1,5 +1,8 @@
 /**
  * Monte Carlo pipeline: single-shot traces for UI + bulk Monte Carlo + parameter sweeps.
+ *
+ * SCOPE — drives exactly the two QEC codes × three noise channels of
+ * all_with_noise_prob.py through the verified state-vector engine.
  */
 
 import { makeRng, StateVector, RNG, GATES, blochFromRho } from './engine';
@@ -67,9 +70,12 @@ export function runLiveRound(
     }
   }
 
-  for (const op of code.decoding) sv.applyGateOp(op.gate, op.qubits, op.param);
-  const rho = sv.partialTraceQ0();
-  for (const op of code.encoding) sv.applyGateOp(op.gate, op.qubits, op.param); // restore encoded state
+  const rho: number[] = (() => {
+    for (const op of code.decoding) sv.applyGateOp(op.gate, op.qubits, op.param);
+    const out = sv.partialTraceQ0();
+    for (const op of code.encoding) sv.applyGateOp(op.gate, op.qubits, op.param); // restore encoded state
+    return out;
+  })();
 
   return {
     bloch: blochFromRho(rho),
@@ -80,23 +86,6 @@ export function runLiveRound(
     noiseEvents: events.map((e) => ({ kind: e.kind, qubit: e.qubit })),
     amplitudes: sv.topAmplitudes(0.008, 8),
   };
-}
-
-/**
- * Non-destructive logical readout: decode a CLONE of the (possibly still
- * encoded) state and return the logical qubit's Bloch vector + fidelity.
- * Used by the 3D lab to show the logical state at every pipeline stage.
- */
-export function readLogicalBloch(
-  code: SVCodeDef,
-  sv: StateVector,
-  theta: number,
-  phi: number
-): { bloch: { x: number; y: number; z: number }; fidelity: number } {
-  const clone = sv.clone();
-  for (const op of code.decoding) clone.applyGateOp(op.gate, op.qubits, op.param);
-  const rho = clone.partialTraceQ0();
-  return { bloch: blochFromRho(rho), fidelity: fidelityFromRho(rho, theta, phi) };
 }
 
 /** One noise round on a bare (unprotected) qubit — the comparison trajectory. */
@@ -250,6 +239,80 @@ export async function mcRunAsync(
   };
 }
 
+/** Partial running statistics streamed to the UI during a Monte Carlo run. */
+export interface PartialMC {
+  done: number;
+  total: number;
+  fidelityQEC: number;
+  fidelityBefore: number;
+  errorRateQEC: number;
+  errorRateBefore: number;
+  detectionRate: number;
+  correctionRate: number;
+  failCount: number;
+}
+
+/**
+ * Streaming Monte Carlo (v5): identical physics to mcRun, but every chunk it
+ * hands the CURRENT running averages to onPartial — so the UI can show the
+ * estimates converging live while the simulation is still running.
+ */
+export async function mcRunStreaming(
+  code: SVCodeDef,
+  noise: NoiseModelId,
+  params: NoiseParams,
+  theta: number,
+  phi: number,
+  shots: number,
+  seed: number,
+  pMeas: number,
+  onPartial: (s: PartialMC) => void,
+  chunkSize = 80
+): Promise<MCResult> {
+  const rng = makeRng(seed);
+  const accum = newAccum();
+  const t0 = Date.now();
+  let done = 0;
+  while (done < shots) {
+    const n = Math.min(chunkSize, shots - done);
+    for (let i = 0; i < n; i++) {
+      mcShot(code, { theta, phi, noise, params, pMeas }, rng, accum);
+    }
+    done += n;
+    const fQ = accum.fidelitySum / accum.shots;
+    const fB = accum.fidelityBeforeSum / accum.shots;
+    onPartial({
+      done: accum.shots,
+      total: shots,
+      fidelityQEC: fQ,
+      fidelityBefore: fB,
+      errorRateQEC: 1 - fQ,
+      errorRateBefore: 1 - fB,
+      detectionRate: accum.detectedCount / accum.shots,
+      correctionRate: accum.correctedCount / accum.shots,
+      failCount: accum.failCount,
+    });
+    await new Promise((r) => setTimeout(r, 0));
+  }
+  const elapsedMs = Date.now() - t0;
+  const fQ = accum.fidelitySum / accum.shots;
+  const fB = accum.fidelityBeforeSum / accum.shots;
+  const errQ = 1 - fQ;
+  const errB = 1 - fB;
+  return {
+    shots: accum.shots,
+    fidelityQEC: fQ,
+    fidelityBefore: fB,
+    errorRateQEC: errQ,
+    errorRateBefore: errB,
+    improvement: errQ > 1e-9 ? errB / errQ : errB > 1e-9 ? Infinity : 1,
+    detectionRate: accum.detectedCount / accum.shots,
+    correctionRate: accum.correctedCount / accum.shots,
+    failureRate: accum.failCount / accum.shots,
+    elapsedMs,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Sweeps
 // ---------------------------------------------------------------------------
@@ -272,8 +335,7 @@ export function sweepSV(
   shots: number,
   seed: number,
   pValues: number[],
-  /** optional per-point params (used for channels whose strength is NOT p,
-   *  e.g. coherent rotation sweeps the angle, thermal relaxation sweeps T1) */
+  /** optional per-point params (kept for API stability) */
   paramsFor?: (p: number) => NoiseParams
 ): SweepPoint[] {
   const points: SweepPoint[] = [];
@@ -330,7 +392,7 @@ function stateLabel(theta: number, phi: number): string {
   return `cos(${(theta / 2).toFixed(2)})|0⟩ + e^(i${phi.toFixed(2)})·sin(${(theta / 2).toFixed(2)})|1⟩`;
 }
 
-function eventDetail(e: { kind: string; qubit: number; prob: number }): string {
+function eventDetail(e: { kind: string; qubit: number; qubit2?: number; prob: number }, thetaDeg: number): string {
   switch (e.kind) {
     case 'X': return `Pauli-X (bit flip) hit qubit ${e.qubit}`;
     case 'Y': return `Pauli-Y hit qubit ${e.qubit}`;
@@ -387,7 +449,7 @@ export function runTrace(
 
   // ---- decode + fidelity
   for (const op of code.decoding) sv.applyGateOp(op.gate, op.qubits, op.param);
-  const rho = sv.partialTraceQ0();
+  const rho: number[] = sv.partialTraceQ0();
   const fidelity = fidelityFromRho(rho, theta, phi);
 
   // ---- bare-qubit baseline
@@ -431,7 +493,7 @@ export function runTrace(
     inputAmps,
     encodedAmps,
     afterNoiseAmps,
-    noiseEvents: events.map((e) => ({ ...e, detail: eventDetail(e) })),
+    noiseEvents: events.map((e) => ({ ...e, detail: eventDetail(e, 0) })),
     syndrome,
     correction,
     decodedBloch: blochFromRho(rho),

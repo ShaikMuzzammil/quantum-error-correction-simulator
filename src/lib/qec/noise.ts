@@ -1,43 +1,39 @@
 /**
  * Noise models for QEC simulation.
  *
- * SCOPE — exactly the three channels of all_with_noise_prob.py's
- * build_noise_model(noise_type, probability):
- *   1 = Bit-Flip Noise (X)   — pauli_error([("X", p), ("I", 1-p)])
- *   2 = Phase-Flip Noise (Z) — pauli_error([("Z", p), ("I", 1-p)])
- *   3 = Depolarizing Noise   — depolarizing_error(p, 1)  (X/Y/Z each p/3)
+ * SCOPE — exactly the three channels implemented in all_with_noise_prob.py
+ * (build_noise_model): 1 = Bit-Flip (X), 2 = Phase-Flip (Z), 3 = Depolarizing.
  *
- * In the Python file the error attaches to the "id" gate of the chosen error
- * qubit; here each model samples discrete error events per qubit
- * (quantum-trajectory style) and can also describe itself analytically.
+ * Each model samples discrete error events per qubit (quantum-trajectory style)
+ * and can also describe itself analytically for UI display.
  */
-
 import { StateVector, RNG, GATES } from './engine';
 
-export type NoiseModelId = 'bitflip' | 'phaseflip' | 'depolarizing';
+export type NoiseModelId =
+  | 'bitflip'
+  | 'phaseflip'
+  | 'depolarizing';
 
 export interface NoiseParams {
   /** main error probability (0..1) */
   p: number;
-  /** syndrome readout error probability (0 by default — the Python file assumes perfect readout) */
+  /** syndrome readout error probability */
   pMeas?: number;
-}
-
-/**
- * Build NoiseParams for the selected channel.
- * All three channels are driven by the single probability p.
- */
-export function noiseParams(p: number, _noise?: NoiseModelId, opts?: { pMeas?: number }): NoiseParams {
-  return {
-    p,
-    pMeas: opts?.pMeas,
-  };
 }
 
 export type ErrorKind = 'X' | 'Y' | 'Z';
 
+/**
+ * Build NoiseParams for the selected channel — one knob, p, exactly like
+ * the probability input of all_with_noise_prob.py.
+ */
+export function noiseParams(p: number, _noise?: NoiseModelId, opts?: { pMeas?: number }): NoiseParams {
+  return { p, pMeas: opts?.pMeas };
+}
+
 export interface NoiseEvent {
-  qubit: number;
+  qubit: number;      // for XX: first qubit of the pair
+  qubit2?: number;    // for XX
   kind: ErrorKind;
   prob: number;       // channel probability that produced this event
 }
@@ -46,48 +42,46 @@ export interface NoiseModelInfo {
   id: NoiseModelId;
   name: string;
   short: string;
-  /** the Python file's menu number (1/2/3) */
-  pythonType: 1 | 2 | 3;
   description: string;
   math: string;
+  pauliOnly: boolean; // can be used with the surface-code Pauli-frame engine
   mainParam: string;
 }
 
 export const NOISE_MODELS: NoiseModelInfo[] = [
   {
     id: 'bitflip',
-    name: 'Bit-Flip Noise (X)',
-    short: 'Bit-Flip (X)',
-    pythonType: 1,
+    name: 'Bit-Flip (X) Noise',
+    short: 'Bit-flip',
     description:
       'A spurious Pauli-X gate flips the qubit state: |0> becomes |1> and vice versa. ' +
       'Classically analogous to a bit flip, this is the simplest quantum error and the one ' +
-      'the 3-qubit bit-flip code was designed to catch. Python: pauli_error([("X", p), ("I", 1-p)]).',
+      'the 3-qubit repetition code was designed for.',
     math: 'E(ρ) = (1−p)·ρ + p·XρX',
+    pauliOnly: true,
     mainParam: 'Flip probability p',
   },
   {
     id: 'phaseflip',
-    name: 'Phase-Flip Noise (Z)',
-    short: 'Phase-Flip (Z)',
-    pythonType: 2,
+    name: 'Phase-Flip (Z) Noise',
+    short: 'Phase-flip',
     description:
       'A Pauli-Z gate flips the relative phase of a superposition: |+> becomes |−>. ' +
       'This error has no classical analogue and is invisible to bit-flip codes — ' +
-      'motivating the phase-flip code. Python: pauli_error([("Z", p), ("I", 1-p)]).',
+      'motivating the 3-qubit Phase-Flip code.',
     math: 'E(ρ) = (1−p)·ρ + p·ZρZ',
+    pauliOnly: true,
     mainParam: 'Phase-flip probability p',
   },
   {
     id: 'depolarizing',
     name: 'Depolarizing Noise',
     short: 'Depolarizing',
-    pythonType: 3,
     description:
-      'The standard benchmark channel: with probability p the qubit is hit by a randomly ' +
-      'chosen Pauli error (X, Y or Z, each p/3). Fully depolarizes the qubit when p = 1. ' +
-      'Python: depolarizing_error(p, 1).',
+      'The standard "gold standard" noise model: with probability p the qubit is hit by a ' +
+      'randomly chosen Pauli error (X, Y or Z, each p/3). Fully depolarizes the qubit when p = 1.',
     math: 'E(ρ) = (1−p)·ρ + p/3·(XρX + YρY + ZρZ)',
+    pauliOnly: true,
     mainParam: 'Depolarizing probability p',
   },
 ];

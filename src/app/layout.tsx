@@ -16,13 +16,14 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Interactive Quantum Error Correction Simulator",
   description:
-    "Phase-2 prototype: a configurable environment for simulating multiple quantum noise models and evaluating QEC performance — Shor, Steane, 5-qubit, repetition and surface codes with Monte Carlo performance analysis.",
-  keywords: ["Quantum Error Correction", "QEC", "Surface Code", "Shor Code", "Steane Code", "Quantum Simulator", "MWPM"],
+    "Phase-2 prototype: an interactive Quantum Error Correction simulator scoped exactly to our Python reference program — 3-qubit bit-flip and phase-flip QEC codes under bit-flip (X), phase-flip (Z) and depolarizing noise, with Monte Carlo performance analysis and a live Bloch-sphere lab.",
+  keywords: ["Quantum Error Correction", "QEC", "Bit-Flip Code", "Phase-Flip Code", "Depolarizing Noise", "Bloch Sphere", "Quantum Simulator"],
   authors: [
     { name: "K. Devendra Reddy" },
     { name: "Shaik Muzzammil" },
     { name: "D. Guna Samhith" },
   ],
+  creator: "AMRITA VISHWA VIDYAPEETHAM — Department of Computer Science",
 };
 
 export default function RootLayout({

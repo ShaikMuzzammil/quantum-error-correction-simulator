@@ -2,15 +2,12 @@
 
 /**
  * Simulator Lab: single-shot QEC pipeline visualization.
- * Implements exactly the pipeline of all_with_noise_prob.py — 3-Qubit
- * Bit-Flip / Phase-Flip QEC under Bit-Flip (X), Phase-Flip (Z) or
- * Depolarizing noise — with the full stage walkthrough (encode → noise →
- * syndrome → correct → decode → measure), the exact Python circuit view,
- * the Python "QEC STATUS" verdict and PDF/JSON/CSV exports (report
- * includes the real circuit diagram).
+ * SCOPE — the two codes × three noise channels of all_with_noise_prob.py:
+ * encode → noise → syndrome → correct → decode → measure, with plain-language
+ * guides, live Bloch-sphere readouts, circuit diagrams and exports.
  */
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Slider } from '@/components/ui/slider';
@@ -18,30 +15,22 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
-import { Play, Dices, Zap, CircleCheck, CircleX, Info, FileText, Braces, Orbit } from 'lucide-react';
+import { Play, Dices, Zap, CircleCheck, CircleX, Info, FileText, Braces, Cpu, ScanSearch, Wand2, CornerDownLeft, Target, RotateCcw } from 'lucide-react';
 import { runTrace, ShotTrace } from '@/lib/qec/pipeline';
-import { getSVCode, pythonQecStatus } from '@/lib/qec/codes';
+import { getSVCode } from '@/lib/qec/codes';
 import { NoiseModelId, NoiseParams, noiseParams } from '@/lib/qec/noise';
 import { CODE_REGISTRY, getCodeMeta } from '@/lib/qec/registry';
 import { makeRng } from '@/lib/qec/engine';
 import { downloadJSON, downloadCSV, openPrintableReport, runId, nowStamp, TEAM_NAMES } from '@/lib/report';
 import BlochSphere from './BlochSphere';
 import CircuitDiagram from './CircuitDiagram';
-import PythonCircuitCard, { pythonCircuitSVG } from './PythonCircuit';
-import { buildPythonCircuit } from '@/lib/qec/codes';
-import { GuideField, HowToCard, ResultTabs, StepList, MeaningCard, TryBox, GuideInfo } from './Guide';
+import { GuideField, HowToCard, ResultTabs, MeaningCard, TryBox, GuideInfo } from './Guide';
 
 const NOISE_LABELS: Record<string, string> = {
-  bitflip: 'Bit-Flip Noise (X)',
-  phaseflip: 'Phase-Flip Noise (Z)',
-  depolarizing: 'Depolarizing Noise',
+  bitflip: 'Bit-Flip (X)',
+  phaseflip: 'Phase-Flip (Z)',
+  depolarizing: 'Depolarizing',
 };
-
-/* per-qubit manual injection state: 0=I, 1=X, 2=Z, 3=Y */
-type CellState = 0 | 1 | 2 | 3;
-
-/* Python file menu numbers */
-const NOISE_PYTYPE: Record<string, 1 | 2 | 3> = { bitflip: 1, phaseflip: 2, depolarizing: 3 };
 
 const STATE_PRESETS = [
   { label: '|0⟩', theta: 0, phi: 0 },
@@ -56,18 +45,18 @@ const STATE_PRESETS = [
 
 const CODE_INFO: GuideInfo = {
   what: "A quantum error correction (QEC) code spreads ONE logical qubit's information across several physical qubits, so hardware errors can be detected and undone. The label [[n,k,d]] means: n = physical qubits used, k = logical qubits protected, d = code distance — the code fixes any ⌊(d−1)/2⌋ errors.",
-  how: "Pick one of the two codes from the dropdown — both run live in your browser and both come straight from all_with_noise_prob.py: 1) the 3-Qubit Bit-Flip code and 2) the 3-Qubit Phase-Flip code.",
+  how: "Pick either code — both run live in your browser. New here? Start with '3-Qubit Bit-Flip', the same code as the Phase-1 worked example.",
   example: 'Choosing 3-Qubit Bit-Flip [[3,1,3]] uses 3 physical qubits to protect 1 logical qubit and can fix any single bit-flip (X) error.',
 };
 
 const NOISE_INFO: GuideInfo = {
-  what: 'The physical disturbance applied to your qubits. The Python reference implements exactly three channels: 1. Bit-Flip Noise (X), 2. Phase-Flip Noise (Z) and 3. Depolarizing Noise — and so does this simulator.',
-  how: 'Choose a channel from the dropdown. Not sure? Keep Bit-Flip (X): it is the classic, easiest-to-follow example and it MATCHES the bit-flip code.',
-  example: 'Bit-Flip Noise at 10%: on every shot, each qubit independently has a 10% chance of flipping |0⟩↔|1⟩.',
+  what: 'The physical disturbance applied to your qubits. Real quantum hardware is never perfect: values flip (bit-flip X), phases flip (Z), or errors arrive mixed (depolarizing). This simulator implements exactly these 3 channels — the same set as our Python reference program.',
+  how: 'Choose a channel — all three work with both codes. Not sure? Keep Bit-Flip (X): it is the classic, easiest-to-follow example.',
+  example: 'Bit-Flip (X) at 10%: on every shot, each qubit independently has a 10% chance of flipping |0⟩↔|1⟩.',
 };
 
 const P_INFO: GuideInfo = {
-  what: 'The strength of the selected noise — the probability that each qubit is hit during one shot (0.100 = 10%). For coherent rotation the slider sets the error rotation angle instead.',
+  what: 'The strength of the selected noise — the probability that each qubit is hit during one shot (0.100 = 10%).',
   how: 'Drag the slider. 10% is the Phase-1 example. Raise it to stress-test the code: at some point protection breaks down — that tipping point is the pseudo-threshold.',
   example: 'p = 0.10 with the 3-qubit bit-flip code → single errors are detected and corrected; the logical qubit survives nearly every shot.',
 };
@@ -91,7 +80,7 @@ const PHI_INFO: GuideInfo = {
 };
 
 const MANUAL_INFO: GuideInfo = {
-  what: 'Instead of letting the random number generator decide, you place the error yourself — deterministic and repeatable, exactly like choosing an error qubit in the Python program.',
+  what: 'Instead of letting the random number generator decide, you place the errors yourself — deterministic and repeatable, perfect for reproducing the Phase-1 worked example.',
   how: 'Switch ON, then click the qubit buttons (they cycle I → X → Z → Y). Your errors are injected in every shot and the sampled noise is disabled.',
   example: 'Turn ON, set q1 = X on the 3-qubit code, then Run Shot → the syndrome flags exactly that qubit and the decoder fixes it.',
 };
@@ -111,12 +100,27 @@ export default function SimulatorLab({ onNavigate }: { onNavigate?: (tab: string
   const [statePreset, setStatePreset] = useState('|0⟩');
   const [seed, setSeed] = useState(42);
   const [manualMode, setManualMode] = useState(false);
-  const [manualErrors, setManualErrors] = useState<Map<string, CellState>>(new Map());
+  const [manualErrors, setManualErrors] = useState<Map<string, number>>(new Map());
   const [trace, setTrace] = useState<ShotTrace | null>(null);
   const [running, setRunning] = useState(false);
-  /* Python circuit reference view: input bit + error qubit (all_with_noise_prob.py inputs) */
-  const [pyBit, setPyBit] = useState<0 | 1>(0);
-  const [pyErr, setPyErr] = useState<0 | 1 | 2>(0);
+  const [playStage, setPlayStage] = useState<number | null>(null); // null idle · 0..5 playing · 6 done
+  const playRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // one-shot pipeline playback: advances the rail stage every 420ms, then stops
+  const startPlayback = () => {
+    if (playRef.current) clearInterval(playRef.current);
+    setPlayStage(0);
+    let s = 0;
+    playRef.current = setInterval(() => {
+      s += 1;
+      setPlayStage(Math.min(s, 6));
+      if (s >= 6 && playRef.current) {
+        clearInterval(playRef.current);
+        playRef.current = null;
+      }
+    }, 420);
+  };
+  useEffect(() => () => { if (playRef.current) clearInterval(playRef.current); }, []);
 
   const codeMeta = useMemo(() => getCodeMeta(codeId), [codeId]);
   const svCode = useMemo(() => getSVCode(codeId), [codeId]);
@@ -124,6 +128,8 @@ export default function SimulatorLab({ onNavigate }: { onNavigate?: (tab: string
 
   const switchCode = (id: string) => {
     setCodeId(id);
+    const meta = getCodeMeta(id);
+    if (!meta.compat.includes(noise)) setNoise(meta.compat[0]);
     setTrace(null);
   };
 
@@ -137,7 +143,7 @@ export default function SimulatorLab({ onNavigate }: { onNavigate?: (tab: string
     }
   };
 
-  const params: NoiseParams = noiseParams(p);
+  const params: NoiseParams = noiseParams(p, noise);
 
   const runShot = () => {
     setRunning(true);
@@ -149,10 +155,9 @@ export default function SimulatorLab({ onNavigate }: { onNavigate?: (tab: string
             z: st === 2 || st === 3,
           }))
         : null;
-      const tr = runTrace(svCode, noise, params, theta, phi, seed, forced);
-      setTrace(tr);
-      // point the Python circuit view at the qubit this shot actually hit
-      if (tr.noiseEvents.length > 0) setPyErr((tr.noiseEvents[0].qubit as 0 | 1 | 2) ?? 0);
+      const t = runTrace(svCode, noise, params, theta, phi, seed, forced);
+      setTrace(t);
+      startPlayback();
     } finally {
       setRunning(false);
     }
@@ -163,7 +168,7 @@ export default function SimulatorLab({ onNavigate }: { onNavigate?: (tab: string
     setTimeout(runShot, 0);
   };
 
-  const toggleInject = (r: number, c: number, next: CellState) => {
+  const toggleInject = (r: number, c: number, next: number) => {
     const q = `${r},${c}`;
     const nextMap = new Map(manualErrors);
     if (next === 0) nextMap.delete(q);
@@ -175,14 +180,13 @@ export default function SimulatorLab({ onNavigate }: { onNavigate?: (tab: string
 
   const configRows = (extra: [string, string][] = []): [string, string][] => {
     const base: [string, string][] = [
-      ['QEC code', `${codeMeta.name} — [[${codeMeta.n},${codeMeta.k},${codeMeta.d}]] (Python QEC ${codeMeta.pythonType})`],
-      ['Engine', 'Full state-vector simulator (all_with_noise_prob.py pipeline)'],
-      ['Noise model', `${NOISE_LABELS[noise] ?? noise} (Python noise ${NOISE_PYTYPE[noise]})`],
+      ['QEC code', `${codeMeta.name} — [[${codeMeta.n},${codeMeta.k},${codeMeta.d}]]`],
+      ['Engine', 'Full state-vector simulator'],
+      ['Noise model', NOISE_LABELS[noise] ?? noise],
       ['Noise strength p', p.toFixed(3)],
-      ['QEC status', pythonQecStatus(NOISE_PYTYPE[noise], codeMeta.pythonType).status],
       ['Input state |ψ⟩', statePreset === 'Custom' ? `θ = ${theta.toFixed(2)} rad, φ = ${phi.toFixed(2)} rad` : statePreset],
+      ['RNG seed', String(seed)],
     ];
-    base.push(['RNG seed', String(seed)]);
     if (manualMode) {
       const desc = [...manualErrors.entries()].map(([k, st]) => `q${k.split(',')[1]}:${['I', 'X', 'Z', 'Y'][st]}`).join(' ') || 'none';
       base.push(['Manual error injection', `${manualMode ? 'ON' : 'OFF'} — ${desc}`]);
@@ -191,7 +195,6 @@ export default function SimulatorLab({ onNavigate }: { onNavigate?: (tab: string
   };
 
   const exportTraceReport = (t: ShotTrace) => {
-    const pyCircuit = buildPythonCircuit(codeMeta.pythonType, pyBit, pyErr);
     openPrintableReport(
       { title: `Single-Shot QEC Pipeline — ${t.codeName}`, runKind: 'Simulator Lab · Single Shot' },
       [
@@ -201,11 +204,6 @@ export default function SimulatorLab({ onNavigate }: { onNavigate?: (tab: string
             ['Encoded state label', t.stateLabel],
             ['Encoding method', 'Unitary encoding circuit'],
           ]),
-        },
-        {
-          heading: 'Circuit — exact all_with_noise_prob.py implementation',
-          svg: pythonCircuitSVG(pyCircuit).svg,
-          note: `bit_flip/phase_flip_qec(${pyBit === 1 ? 'input_bit=1' : 'input_bit=0'}, error_qubit=${pyErr}) — 5 qubits + 3 classical bits, syndrome measurement and conditional corrections exactly as in the Python file.`,
         },
         {
           heading: 'Outputs (Results)',
@@ -236,7 +234,7 @@ export default function SimulatorLab({ onNavigate }: { onNavigate?: (tab: string
         },
         {
           heading: 'Methodology',
-          text: `The shot executes the complete pipeline of all_with_noise_prob.py: encode |ψ⟩ into the [[${codeMeta.n},${codeMeta.k},${codeMeta.d}]] codespace, sample the selected noise channel via quantum trajectories, measure every stabilizer generator projectively (the ancilla-free equivalent of the q3/q4 ancilla checks), apply the table-driven decoder correction, decode, and compute the logical fidelity against the target pure state. The bare-qubit baseline receives the identical noise. Team: ${TEAM_NAMES.join(', ')} — Amrita Vishwa Vidyapeetham.`,
+          text: `The shot executes the complete Phase-1 pipeline: encode |ψ⟩ into the [[${codeMeta.n},${codeMeta.k},${codeMeta.d}]] codespace, sample the selected noise channel via quantum trajectories, measure every stabilizer generator projectively, apply the table-driven decoder correction, decode, and compute the logical fidelity against the target pure state. The bare-qubit baseline receives the identical noise. Team: ${TEAM_NAMES.join(', ')}.`,
         },
       ]
     );
@@ -273,7 +271,6 @@ export default function SimulatorLab({ onNavigate }: { onNavigate?: (tab: string
     );
   };
 
-
   return (
     <div className="flex flex-col gap-4">
       <HowToCard
@@ -283,19 +280,19 @@ export default function SimulatorLab({ onNavigate }: { onNavigate?: (tab: string
           { title: 'Read the Results tab', body: 'Green verdict = quantum information recovered. Fidelity near 100% means the state survived; the bare-qubit number shows what would happen without any protection.' },
           { title: 'Open the other two tabs', body: '“How it was computed” replays the pipeline with YOUR actual numbers; “What it means” interprets every value and suggests your next experiment.' },
         ]}
-        tip="Every input below shows a one-line hint plus a ? button with the full story — no prior quantum knowledge needed."
+        tip="New to quantum error correction? Keep Guide Mode ON (top bar) — every input then shows a one-line hint plus a ? button with the full story."
       />
       <div className="grid gap-6 lg:grid-cols-[360px_1fr]">
       {/* ------------------------------ Control panel */}
       <div className="flex flex-col gap-4">
-        <Card className="border-violet-500/20 bg-[#141126]">
+        <Card className="glass border-white/8">
           <CardHeader className="pb-3">
             <CardTitle className="text-base text-violet-300">Configuration</CardTitle>
           </CardHeader>
           <CardContent className="flex flex-col gap-5">
             <GuideField label="QEC Code" info={CODE_INFO} hint="One logical qubit protected by n physical ones. New here? Keep 3-Qubit Bit-Flip.">
               <Select value={codeId} onValueChange={switchCode}>
-                <SelectTrigger className="w-full border-violet-500/30 bg-[#1c1836]"><SelectValue /></SelectTrigger>
+                <SelectTrigger className="w-full border-violet-400/25 bg-white/[0.04]"><SelectValue /></SelectTrigger>
                 <SelectContent className="max-h-72">
                   {CODE_REGISTRY.map((c) => (
                     <SelectItem key={c.id} value={c.id}>
@@ -313,7 +310,7 @@ export default function SimulatorLab({ onNavigate }: { onNavigate?: (tab: string
 
             <GuideField label="Noise Model" info={NOISE_INFO} hint="How qubits get disturbed in this experiment. Bit-Flip (X) is the classic first example.">
               <Select value={noise} onValueChange={(v) => setNoise(v as NoiseModelId)}>
-                <SelectTrigger className="w-full border-violet-500/30 bg-[#1c1836]"><SelectValue /></SelectTrigger>
+                <SelectTrigger className="w-full border-violet-400/25 bg-white/[0.04]"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {compatNoise.map((id) => (
                     <SelectItem key={id} value={id}>{NOISE_LABELS[id]}</SelectItem>
@@ -322,47 +319,49 @@ export default function SimulatorLab({ onNavigate }: { onNavigate?: (tab: string
               </Select>
             </GuideField>
 
-            <GuideField
-              label="Error probability p"
-              info={P_INFO}
-              hint="Chance each qubit is hit per shot. 10% is the Phase-1 example."
-              right={<span className="font-mono text-violet-300">{p.toFixed(3)}</span>}
-            >
-              <Slider
-                value={[Math.round(p * 500)]}
-                min={0}
-                max={500}
-                step={1}
-                onValueChange={(v) => setP(v[0] / 500)}
-                className="text-violet-400"
-              />
-            </GuideField>
+            {(
+              <GuideField
+                label="Error probability p"
+                info={P_INFO}
+                hint="Chance each qubit is hit per shot. 10% is the Phase-1 example."
+                right={<span className="font-mono text-violet-300">{p.toFixed(3)}</span>}
+              >
+                <Slider
+                  value={[Math.round(p * 500)]}
+                  min={0}
+                  max={500}
+                  step={1}
+                  onValueChange={(v) => setP(v[0] / 500)}
+                  className="text-violet-400"
+                />
+              </GuideField>
+            )}
 
             <GuideField label="Input State |ψ⟩" info={STATE_INFO} hint="Where your qubit starts on the Bloch sphere. Presets are the classic points.">
-                <div className="flex flex-wrap gap-1.5">
-                  {STATE_PRESETS.map((s) => (
-                    <Button
-                      key={s.label}
-                      size="sm"
-                      variant={statePreset === s.label ? 'default' : 'outline'}
-                      className={statePreset === s.label ? 'bg-violet-600 hover:bg-violet-500' : 'border-violet-500/30 text-slate-300'}
-                      onClick={() => applyPreset(s.label)}
-                    >
-                      {s.label}
-                    </Button>
-                  ))}
+              <div className="flex flex-wrap gap-1.5">
+                {STATE_PRESETS.map((s) => (
+                  <Button
+                    key={s.label}
+                    size="sm"
+                    variant={statePreset === s.label ? 'default' : 'outline'}
+                    className={statePreset === s.label ? 'bg-violet-600 hover:bg-violet-500' : 'border-violet-500/30 text-slate-300'}
+                    onClick={() => applyPreset(s.label)}
+                  >
+                    {s.label}
+                  </Button>
+                ))}
+              </div>
+              {statePreset === 'Custom' && (
+                <div className="mt-3 flex flex-col gap-3 rounded-lg border border-violet-500/20 p-3">
+                  <GuideField label="θ (polar angle)" info={THETA_INFO} right={<span className="font-mono text-violet-300">{theta.toFixed(2)} rad</span>}>
+                    <Slider value={[Math.round((theta / Math.PI) * 100)]} min={0} max={100} onValueChange={(v) => setTheta((v[0] / 100) * Math.PI)} />
+                  </GuideField>
+                  <GuideField label="φ (azimuth)" info={PHI_INFO} right={<span className="font-mono text-violet-300">{phi.toFixed(2)} rad</span>}>
+                    <Slider value={[Math.round((phi / (2 * Math.PI)) * 100)]} min={0} max={100} onValueChange={(v) => setPhi((v[0] / 100) * 2 * Math.PI)} />
+                  </GuideField>
                 </div>
-                {statePreset === 'Custom' && (
-                  <div className="mt-3 flex flex-col gap-3 rounded-lg border border-violet-500/20 p-3">
-                    <GuideField label="θ (polar angle)" info={THETA_INFO} right={<span className="font-mono text-violet-300">{theta.toFixed(2)} rad</span>}>
-                      <Slider value={[Math.round((theta / Math.PI) * 100)]} min={0} max={100} onValueChange={(v) => setTheta((v[0] / 100) * Math.PI)} />
-                    </GuideField>
-                    <GuideField label="φ (azimuth)" info={PHI_INFO} right={<span className="font-mono text-violet-300">{phi.toFixed(2)} rad</span>}>
-                      <Slider value={[Math.round((phi / (2 * Math.PI)) * 100)]} min={0} max={100} onValueChange={(v) => setPhi((v[0] / 100) * 2 * Math.PI)} />
-                    </GuideField>
-                  </div>
-                )}
-              </GuideField>
+              )}
+            </GuideField>
 
             <GuideField
               label="Manual Error Injection"
@@ -389,7 +388,7 @@ export default function SimulatorLab({ onNavigate }: { onNavigate?: (tab: string
                         size="sm"
                         variant="outline"
                         className={`h-8 w-9 font-mono ${color}`}
-                        onClick={() => toggleInject(0, q, ((st + 1) % 4) as CellState)}
+                        onClick={() => toggleInject(0, q, (st + 1) % 4)}
                       >
                         <span className="text-[9px] text-slate-500 mr-0.5">q{q}</span>{label}
                       </Button>
@@ -418,9 +417,11 @@ export default function SimulatorLab({ onNavigate }: { onNavigate?: (tab: string
       {/* ------------------------------ Results panel */}
       <div className="flex flex-col gap-4">
         {!trace && (
-          <Card className="border-dashed border-violet-500/30 bg-[#100d1e]">
+          <Card className="glass border-dashed border-violet-400/25">
             <CardContent className="flex min-h-[420px] flex-col items-center justify-center gap-3 text-center">
-              <Zap className="h-10 w-10 text-violet-500/60" />
+              <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-violet-500/10">
+                <Zap className="h-8 w-8 text-violet-400/70" />
+              </div>
               <p className="max-w-sm text-sm text-slate-400">
                 Configure a QEC code and noise model, then press <span className="text-violet-300">Run Shot</span> to
                 step through the full error-correction pipeline — encoding, noise injection, syndrome extraction,
@@ -431,19 +432,83 @@ export default function SimulatorLab({ onNavigate }: { onNavigate?: (tab: string
         )}
 
         {trace && (
-          <SVTraceView
-            trace={trace}
-            codeMeta={codeMeta}
-            pyBit={pyBit}
-            pyErr={pyErr}
-            setPyBit={setPyBit}
-            setPyErr={setPyErr}
-            onReport={exportTraceReport}
-            onJSON={exportTraceJSON}
-            onCSV={exportTraceCSV}
-          />
+          <>
+            <PipelineRail stage={playStage} onReplay={startPlayback} />
+            <div className="rise-in">
+              <SVTraceView trace={trace} onReport={exportTraceReport} onJSON={exportTraceJSON} onCSV={exportTraceCSV} />
+            </div>
+          </>
         )}
       </div>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* PipelineRail — animated stage-by-stage playback of the 6 pipeline   */
+/* phases (v5). Lights up one stage at a time after each Run Shot,     */
+/* then rests in the "all complete" state. One-shot, never loops.      */
+/* ------------------------------------------------------------------ */
+
+const RAIL_STAGES = [
+  { label: 'Encode', icon: Cpu, hint: 'spread |ψ⟩ across physical qubits' },
+  { label: 'Noise', icon: Zap, hint: 'sample the selected error channel' },
+  { label: 'Syndrome', icon: ScanSearch, hint: 'stabilizer checks flag defects' },
+  { label: 'Correct', icon: Wand2, hint: 'decoder-applied recovery gates' },
+  { label: 'Decode', icon: CornerDownLeft, hint: 'un-encode back to 1 qubit' },
+  { label: 'Measure', icon: Target, hint: 'read out + score the fidelity' },
+];
+
+function PipelineRail({ stage, onReplay }: {
+  stage: number | null;
+  onReplay: () => void;
+}) {
+  const playing = stage !== null && stage < RAIL_STAGES.length;
+  const done = stage !== null && stage >= RAIL_STAGES.length;
+  return (
+    <div className="glass relative overflow-hidden rounded-xl px-4 py-3">
+      {playing && (
+        <div aria-hidden className="absolute inset-x-0 top-0 h-[2px] overflow-hidden">
+          <div className="sweep-x h-full w-1/4 bg-gradient-to-r from-transparent via-cyan-300 to-transparent" />
+        </div>
+      )}
+      <div className="flex flex-wrap items-center gap-x-1 gap-y-2">
+        <span className="mr-2 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+          Pipeline · {done ? 'complete' : playing ? 'running…' : 'replay'}
+        </span>
+        {RAIL_STAGES.map((s, i) => {
+          const Icon = s.icon;
+          const isDone = done || (stage !== null && i < stage);
+          const isActive = stage === i;
+          return (
+            <span key={s.label} className="flex items-center gap-1">
+              <span
+                title={s.hint}
+                className={`flex items-center gap-1.5 rounded-lg border px-2 py-1.5 text-[11px] font-medium transition-all duration-300 ${
+                  isActive
+                    ? 'stage-active border-cyan-300/70 bg-cyan-400/15 text-cyan-100'
+                    : isDone
+                      ? 'border-emerald-400/40 bg-emerald-400/10 text-emerald-300'
+                      : 'border-white/8 bg-white/[0.02] text-slate-500'
+                }`}
+              >
+                {isDone && !isActive ? <CircleCheck className="h-3 w-3" /> : <Icon className={`h-3 w-3 ${isActive ? '' : 'opacity-70'}`} />}
+                {s.label}
+              </span>
+              {i < RAIL_STAGES.length - 1 && (
+                <span className={`h-px w-3 transition-colors duration-300 ${isDone ? 'bg-emerald-400/50' : 'bg-slate-700'}`} />
+              )}
+            </span>
+          );
+        })}
+        <button
+          onClick={onReplay}
+          className="ml-auto flex items-center gap-1 rounded-md border border-violet-400/25 px-2 py-1 text-[10px] text-violet-300 transition-colors hover:bg-violet-500/15"
+          aria-label="Replay pipeline animation"
+        >
+          <RotateCcw className="h-3 w-3" /> Replay
+        </button>
       </div>
     </div>
   );
@@ -454,20 +519,15 @@ export default function SimulatorLab({ onNavigate }: { onNavigate?: (tab: string
 function Stat({ label, value, tone }: { label: string; value: string; tone?: 'good' | 'bad' | 'neutral' }) {
   const color = tone === 'good' ? 'text-emerald-400' : tone === 'bad' ? 'text-rose-400' : 'text-slate-200';
   return (
-    <div className="rounded-lg border border-violet-500/15 bg-[#181430] px-3 py-2">
+    <div className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2">
       <div className="text-[10px] uppercase tracking-wide text-slate-500">{label}</div>
       <div className={`font-mono text-lg font-semibold ${color}`}>{value}</div>
     </div>
   );
 }
 
-function SVTraceView({ trace, codeMeta, pyBit, pyErr, setPyBit, setPyErr, onReport, onJSON, onCSV }: {
+function SVTraceView({ trace, onReport, onJSON, onCSV }: {
   trace: ShotTrace;
-  codeMeta: { pythonType: 1 | 2; name: string };
-  pyBit: 0 | 1;
-  pyErr: 0 | 1 | 2;
-  setPyBit: (b: 0 | 1) => void;
-  setPyErr: (q: 0 | 1 | 2) => void;
   onReport: (t: ShotTrace) => void;
   onJSON: (t: ShotTrace) => void;
   onCSV: (t: ShotTrace) => void;
@@ -499,17 +559,12 @@ function SVTraceView({ trace, codeMeta, pyBit, pyErr, setPyBit, setPyErr, onRepo
     { n: 6, title: 'Measurement', detail: `Logical outcome: |${trace.measuredOutcome}⟩ — ${trace.detectionNote}`, ok: trace.recovered },
   ];
 
-  const pyCircuitTitle = codeMeta.pythonType === 1 ? 'bit_flip_qec(input_bit, error_qubit)' : 'phase_flip_qec(input_bit, error_qubit)';
-  const pyStatus = pythonQecStatus(NOISE_PYTYPE[trace.noiseId] ?? 1, codeMeta.pythonType);
-  const statusTone =
-    pyStatus.status === 'MATCHED' ? 'border-emerald-500/50 text-emerald-300' : pyStatus.status === 'DEPOLARIZING' ? 'border-cyan-500/50 text-cyan-300' : 'border-amber-500/50 text-amber-300';
-
   return (
     <ResultTabs
       results={
         <>
       {/* verdict */}
-      <Card className={`border ${trace.recovered ? 'border-emerald-500/40' : 'border-amber-500/40'} bg-[#101a14]`}>
+      <Card className={`border ${trace.recovered ? 'border-emerald-400/40 bg-emerald-400/[0.05]' : 'border-amber-400/40 bg-amber-400/[0.05]'}`}>
         <CardContent className="flex flex-wrap items-center justify-between gap-3 py-4">
           <div className="flex items-center gap-3">
             {trace.recovered ? <CircleCheck className="h-7 w-7 text-emerald-400" /> : <CircleX className="h-7 w-7 text-amber-400" />}
@@ -520,9 +575,6 @@ function SVTraceView({ trace, codeMeta, pyBit, pyErr, setPyBit, setPyErr, onRepo
               <div className="text-xs text-slate-400">
                 {trace.codeName} · {trace.noiseName} · p = {trace.p.toFixed(3)} · seed trace in {trace.elapsedMs} ms
               </div>
-              <span className={`mt-1.5 inline-block rounded-full border px-2.5 py-0.5 text-[10px] font-semibold tracking-wide ${statusTone}`}>
-                QEC STATUS: {pyStatus.status}
-              </span>
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -545,7 +597,7 @@ function SVTraceView({ trace, codeMeta, pyBit, pyErr, setPyBit, setPyErr, onRepo
 
       <div className="grid gap-4 lg:grid-cols-2">
         {/* encoding circuit */}
-        <Card className="border-violet-500/15 bg-[#141126]">
+        <Card className="glass border-white/8">
           <CardHeader className="pb-2"><CardTitle className="text-sm text-slate-200">Encoding Circuit & Error Injection</CardTitle></CardHeader>
           <CardContent>
             <CircuitDiagram
@@ -560,39 +612,8 @@ function SVTraceView({ trace, codeMeta, pyBit, pyErr, setPyBit, setPyErr, onRepo
           </CardContent>
         </Card>
 
-        {/* exact Python circuit (all_with_noise_prob.py) */}
-        <Card className="border-violet-500/15 bg-[#141126] lg:col-span-2">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm text-slate-200">Exact Python Circuit — {pyCircuitTitle}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="mb-3 flex flex-wrap items-center gap-3">
-              <div className="flex items-center gap-1.5">
-                <span className="text-[11px] text-slate-400">input_bit</span>
-                {[0, 1].map((v) => (
-                  <Button key={v} size="sm" variant={pyBit === v ? 'default' : 'outline'} className={pyBit === v ? 'h-7 bg-violet-600 px-2.5 hover:bg-violet-500' : 'h-7 border-violet-500/30 px-2.5 text-slate-300'} onClick={() => setPyBit(v as 0 | 1)}>
-                    {v}
-                  </Button>
-                ))}
-              </div>
-              <div className="flex items-center gap-1.5">
-                <span className="text-[11px] text-slate-400">error_qubit (noise attaches to its id gate)</span>
-                {[0, 1, 2].map((v) => (
-                  <Button key={v} size="sm" variant={pyErr === v ? 'default' : 'outline'} className={pyErr === v ? 'h-7 bg-amber-600 px-2.5 hover:bg-amber-500' : 'h-7 border-violet-500/30 px-2.5 text-slate-300'} onClick={() => setPyErr(v as 0 | 1 | 2)}>
-                    {v}
-                  </Button>
-                ))}
-              </div>
-              <span className="text-[11px] text-slate-500">
-                Same 5-qubit + 3-bit circuit the Python file builds; the engine below runs its ancilla-free equivalent.
-              </span>
-            </div>
-            <PythonCircuitCard pythonType={codeMeta.pythonType} inputBit={pyBit} errorQubit={pyErr} />
-          </CardContent>
-        </Card>
-
         {/* Bloch spheres */}
-        <Card className="border-violet-500/15 bg-[#141126]">
+        <Card className="glass border-white/8">
           <CardHeader className="pb-2"><CardTitle className="text-sm text-slate-200">Logical State Comparison</CardTitle></CardHeader>
           <CardContent>
             <div className="flex items-center justify-around">
@@ -605,7 +626,7 @@ function SVTraceView({ trace, codeMeta, pyBit, pyErr, setPyBit, setPyErr, onRepo
 
       <div className="grid gap-4 lg:grid-cols-2">
         {/* syndrome table */}
-        <Card className="border-violet-500/15 bg-[#141126]">
+        <Card className="glass border-white/8">
           <CardHeader className="pb-2"><CardTitle className="text-sm text-slate-200">Syndrome Table</CardTitle></CardHeader>
           <CardContent>
             <div className="grid max-h-56 grid-cols-2 gap-1.5 overflow-y-auto pr-1 sm:grid-cols-3">
@@ -621,21 +642,13 @@ function SVTraceView({ trace, codeMeta, pyBit, pyErr, setPyBit, setPyErr, onRepo
                 </div>
               ))}
             </div>
-            <Separator className="my-3 bg-violet-500/15" />
+            <Separator className="my-3 bg-white/10" />
             <div className="text-[11px] text-slate-500">{trace.detectionNote}</div>
-            <Separator className="my-3 bg-violet-500/15" />
-            <div className="text-[11px] font-semibold text-slate-300">Syndrome → error mapping (Python file)</div>
-            <div className="mt-1.5 grid grid-cols-2 gap-1.5 font-mono text-[11px] text-slate-400 sm:grid-cols-4">
-              <span className="rounded border border-slate-600/30 px-2 py-1">00 → No error</span>
-              <span className="rounded border border-rose-500/40 px-2 py-1 text-rose-300">01 → q0 error</span>
-              <span className="rounded border border-rose-500/40 px-2 py-1 text-rose-300">11 → q1 error</span>
-              <span className="rounded border border-rose-500/40 px-2 py-1 text-rose-300">10 → q2 error</span>
-            </div>
           </CardContent>
         </Card>
 
         {/* state inspector */}
-        <Card className="border-violet-500/15 bg-[#141126]">
+        <Card className="glass border-white/8">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm text-slate-200">
               Encoded State After Noise — |ψ⟩ = {trace.stateLabel}
@@ -667,7 +680,7 @@ function SVTraceView({ trace, codeMeta, pyBit, pyErr, setPyBit, setPyErr, onRepo
           </p>
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             {steps.map((s) => (
-              <Card key={s.n} className="border-cyan-500/15 bg-[#101823]">
+              <Card key={s.n} className="glass border-white/8">
                 <CardHeader className="pb-2 pt-4">
                   <CardTitle className="flex items-center gap-2 text-sm">
                     <span className="flex h-6 w-6 items-center justify-center rounded-full bg-cyan-600/25 font-mono text-xs text-cyan-300">{s.n}</span>
@@ -699,14 +712,14 @@ function SVTraceView({ trace, codeMeta, pyBit, pyErr, setPyBit, setPyErr, onRepo
             <MeaningCard tone="warn" title={trace.recovered ? 'Full recovery — what happened' : 'Partial recovery — why it happens'}>
               {trace.recovered
                 ? 'The decoder identified the exact error from the syndrome and cancelled it completely. The measured logical qubit equals your input state.'
-                : `The decoded state is close but imperfect. With Pauli channels this happens when SEVERAL errors hit the same block: the code's distance only guarantees correcting one, so the decoder picks the nearest single-error match and some damage remains. Engine note: ${trace.detectionNote}`}
+                : `The decoded state is close but imperfect. This typically happens with non-Pauli channels (amplitude damping, coherent rotations, thermal relaxation), which nudge the state continuously instead of flipping it — Pauli-type codes can only fully reverse Pauli-type errors. Engine note: ${trace.detectionNote}`}
             </MeaningCard>
             <MeaningCard tone="good" title="The syndrome — error clues without spying">
               Measuring the data qubits directly would destroy the superposition you are protecting. Stabilizer checks answer only “do these neighbours DISAGREE?” — enough to locate the error while the quantum information stays untouched. That indirectness is the central trick of quantum error correction.
             </MeaningCard>
           </div>
           <TryBox>
-            Raise the noise slider until the QEC fidelity drops toward the bare number — that is this code&apos;s pain point. Then switch to the other QEC code at the same noise and compare (bit-flip code loves X noise, phase-flip code loves Z noise). For continuous protection, open the 3D Quantum Lab → Bloch Flight 4D and watch dozens of live correction rounds.
+            Raise the noise slider until the QEC fidelity drops toward the bare number — that is this code&apos;s pain point. Then switch to the 3-Qubit Phase-Flip code at the same noise and compare. For continuous protection, open the 3D Quantum Lab → Bloch Flight 4D and watch live correction rounds on the Bloch sphere.
           </TryBox>
         </>
       }
@@ -724,4 +737,3 @@ function getN(codeId: string) {
   const c = SV_CODES.find((x) => x.id === codeId);
   return c?.n ?? 1;
 }
-

@@ -1,8 +1,8 @@
 {
   "name": "qec-simulator",
-  "version": "8.0.0",
+  "version": "9.0.0",
   "private": true,
-  "description": "Interactive Quantum Error Correction Simulator — Focused Edition. Exactly the scope of all_with_noise_prob.py: 2 QEC codes × 3 noise channels, verified state-vector engine, 3D/4D lab, exports with embedded circuits.",
+  "description": "Interactive Quantum Error Correction Simulator \u2014 Phase 2 prototype (Bloch-sphere focused edition). Exactly the scope of all_with_noise_prob.py: 2 QEC codes x 3 noise channels, verified state-vector engine, real-time Bloch-sphere 3D lab, PDF/JSON/CSV exports, Vercel-ready.",
   "scripts": {
     "dev": "next dev -p 3000",
     "build": "next build",

@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  :root {
+    --header-fill: #405f6f; --card-bg: #eef2f4; --border: #c0ccd2;
+    --accent: #227fad; --accent2: #bd7962; --text: #1b1c1d;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { width: 1160px; background: #ffffff; font-family: 'Segoe UI', Arial, sans-serif; padding: 24px; }
+  .lane { display: flex; align-items: stretch; }
+  .stage {
+    flex: 1; background: var(--card-bg); border: 2px solid var(--border);
+    border-radius: 10px; padding: 13px 11px; position: relative;
+  }
+  .stage h3 { font-size: 17.5px; color: var(--text); line-height: 1.2; margin-bottom: 5px; }
+  .stage p { font-size: 13px; color: #4a5560; line-height: 1.35; }
+  .stage .n {
+    position: absolute; top: -14px; left: 12px; width: 26px; height: 26px; border-radius: 50%;
+    background: var(--header-fill); color: #fff; font-size: 14px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .noise { border-color: #b78a5e; background: #f7f1ea; }
+  .noise h3 { color: #7a5230; }
+  .arrow { display: flex; align-items: center; padding: 0 3px; margin-top: 12px; }
+  .qbits { margin-top: 14px; display: flex; gap: 8px; justify-content: center; }
+  .qbit {
+    font-size: 12px; color: #4a5560; background: #fff; border: 1.5px dashed var(--border);
+    border-radius: 6px; padding: 5px 12px;
+  }
+  .qbit b { color: var(--header-fill); font-family: Consolas, monospace; }
+</style>
+</head>
+<body>
+  <div class="lane">
+    <div class="stage"><span class="n">1</span>
+      <h3>Input bit</h3>
+      <p>One classical bit 0 / 1 is the value to protect</p>
+    </div>
+    <div class="arrow"><svg width="26" height="22"><path d="M2 11 H18 M13 4 L21 11 L13 18" stroke="#405f6f" stroke-width="2.6" fill="none" stroke-linecap="round"/></svg></div>
+    <div class="stage"><span class="n">2</span>
+      <h3>Encode</h3>
+      <p>CNOTs copy the bit across three data qubits q0-q2</p>
+    </div>
+    <div class="arrow"><svg width="26" height="22"><path d="M2 11 H18 M13 4 L21 11 L13 18" stroke="#405f6f" stroke-width="2.6" fill="none" stroke-linecap="round"/></svg></div>
+    <div class="stage noise"><span class="n" style="background:#b78a5e">3</span>
+      <h3>ID-gate noise</h3>
+      <p>X, Z or depolarizing error with probability p — the only noise entry point</p>
+    </div>
+    <div class="arrow"><svg width="26" height="22"><path d="M2 11 H18 M13 4 L21 11 L13 18" stroke="#405f6f" stroke-width="2.6" fill="none" stroke-linecap="round"/></svg></div>
+    <div class="stage"><span class="n">4</span>
+      <h3>Syndrome</h3>
+      <p>Two ancillas measure parities: 00 / 01 / 11 / 10 names the broken qubit</p>
+    </div>
+    <div class="arrow"><svg width="26" height="22"><path d="M2 11 H18 M13 4 L21 11 L13 18" stroke="#405f6f" stroke-width="2.6" fill="none" stroke-linecap="round"/></svg></div>
+    <div class="stage"><span class="n">5</span>
+      <h3>Correct</h3>
+      <p>if_test applies X to exactly the qubit the syndrome names</p>
+    </div>
+    <div class="arrow"><svg width="26" height="22"><path d="M2 11 H18 M13 4 L21 11 L13 18" stroke="#405f6f" stroke-width="2.6" fill="none" stroke-linecap="round"/></svg></div>
+    <div class="stage"><span class="n">6</span>
+      <h3>Decode + measure</h3>
+      <p>CNOTs uncompute; final bit compared with the input — success or failure</p>
+    </div>
+  </div>
+  <div class="qbits">
+    <span class="qbit">Registers: <b>q0-q2</b> data · <b>q3, q4</b> syndrome ancillas · <b>c0, c1</b> syndrome bits · <b>c2</b> final bit</span>
+    <span class="qbit">Qiskit counts key: <b>"c2 c1 c0"</b> — e.g. 100 = wrong bit, syndrome 00</span>
+    <span class="qbit">QEC STATUS: <b>MATCHED</b> · <b>NOT MATCHED</b> · <b>DEPOLARIZING</b></span>
+  </div>
+</body>
+</html>

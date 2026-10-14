@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  :root {
+    --header-fill: #405f6f; --card-bg: #eef2f4; --border: #c0ccd2;
+    --accent: #227fad; --accent2: #bd7962; --text: #1b1c1d; --muted: #838a8d;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { width: 1160px; background: #ffffff; font-family: 'Segoe UI', Arial, sans-serif; padding: 26px 24px; }
+  .flow { display: flex; align-items: stretch; gap: 0; }
+  .node {
+    flex: 1; background: var(--card-bg); border: 2px solid var(--border);
+    border-top: 4px solid var(--accent); border-radius: 10px; padding: 14px 12px;
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .node h3 { font-size: 19px; color: var(--text); line-height: 1.2; }
+  .node p { font-size: 13.5px; color: #4a5560; line-height: 1.38; }
+  .node .tag { font-size: 11px; font-weight: 700; letter-spacing: 1.5px; color: var(--accent); text-transform: uppercase; }
+  .arrow { display: flex; align-items: center; padding: 0 4px; }
+  .arrow svg { display: block; }
+  .verify { border-top-color: #489260; }
+  .verify .tag { color: #489260; }
+  .theory { border-top-color: var(--accent2); }
+  .theory .tag { color: var(--accent2); }
+</style>
+</head>
+<body>
+  <div class="flow">
+    <div class="node">
+      <span class="tag">Step 1 · Reference</span>
+      <h3>Qiskit program</h3>
+      <p>all_with_noise_prob.py — bit_flip_qec, phase_flip_qec, build_noise_model, 1000-shot Aer run</p>
+    </div>
+    <div class="arrow"><svg width="34" height="24"><path d="M2 12 H24 M18 4 L28 12 L18 20" stroke="#227fad" stroke-width="3" fill="none" stroke-linecap="round"/></svg></div>
+    <div class="node">
+      <span class="tag">Step 2 · Port</span>
+      <h3>1:1 TypeScript mirror</h3>
+      <p>pyqec.ts — same gate lists, ID-gate noise, if_test corrections, counts format "c2 c1 c0"</p>
+    </div>
+    <div class="arrow"><svg width="34" height="24"><path d="M2 12 H24 M18 4 L28 12 L18 20" stroke="#227fad" stroke-width="3" fill="none" stroke-linecap="round"/></svg></div>
+    <div class="node verify">
+      <span class="tag">Step 3 · Verify</span>
+      <h3>44-assertion suite</h3>
+      <p>Circuit structure, noise-free runs 500/500, matched pairings correct 100% of fired errors</p>
+    </div>
+    <div class="arrow"><svg width="34" height="24"><path d="M2 12 H24 M18 4 L28 12 L18 20" stroke="#227fad" stroke-width="3" fill="none" stroke-linecap="round"/></svg></div>
+    <div class="node theory">
+      <span class="tag">Step 4 · Cross-check</span>
+      <h3>Hand-derived analytics</h3>
+      <p>100% matched · 1−p unmatched · 1−2p/3 depolarizing — drawn as theory lines on every chart</p>
+    </div>
+    <div class="arrow"><svg width="34" height="24"><path d="M2 12 H24 M18 4 L28 12 L18 20" stroke="#227fad" stroke-width="3" fill="none" stroke-linecap="round"/></svg></div>
+    <div class="node">
+      <span class="tag">Step 5 · Interface</span>
+      <h3>Live web prototype</h3>
+      <p>Simulator Lab · Performance Lab · 3D/4D/5D lab · Learn · CSV / JSON / PDF / PNG exports</p>
+    </div>
+  </div>
+</body>
+</html>

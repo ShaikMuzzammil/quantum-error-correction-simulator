@@ -66,16 +66,16 @@ export function InfoDot({ info, title }: { info: GuideInfo; title: string }) {
         aria-expanded={open}
         aria-label={`Explain: ${title}`}
         title={`Explain: ${title}`}
-        className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full border text-[10px] font-bold leading-none transition-colors ${
+        className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full border text-[10px] font-bold leading-none transition-all ${
           open
-            ? 'border-cyan-300 bg-cyan-500/30 text-cyan-100'
-            : 'border-cyan-500/50 text-cyan-400 hover:border-cyan-300 hover:bg-cyan-500/15'
+            ? 'border-cyan-300 bg-cyan-400/25 text-cyan-100 shadow-[0_0_10px_rgba(34,211,238,0.4)]'
+            : 'border-cyan-400/40 bg-cyan-500/5 text-cyan-300/90 hover:border-cyan-300 hover:bg-cyan-400/15'
         }`}
       >
         ?
       </button>
       {open && (
-        <span className="mt-2 block w-full rounded-lg border border-cyan-500/25 bg-[#0e1a24] p-3 text-left shadow-lg">
+        <span className="glass-deep pop-in mt-2 block w-full rounded-xl border-cyan-400/20 p-3 text-left">
           <span className="mb-1 flex items-start justify-between gap-2">
             <span className="text-[11px] font-semibold text-cyan-200">{title}</span>
             <button onClick={() => setOpen(false)} className="text-[10px] text-slate-500 hover:text-slate-300" aria-label="Close explanation">✕ close</button>
@@ -124,6 +124,7 @@ export function GuideField({ label, info, hint, right, children }: {
         </span>
       </div>
       {beginner && hint && <p className="-mt-0.5 mb-1.5 text-[11px] leading-snug text-slate-500">{hint}</p>}
+      {/* children rendered by caller */}
       {children}
     </div>
   );
@@ -145,40 +146,38 @@ export function HowToCard({ title = 'How to use this lab', steps, tip }: {
   const open = override ?? false;
 
   return (
-    <Card className="border-amber-500/25 bg-gradient-to-r from-[#1d1606] to-[#141126]">
-      <CardContent className="p-0">
-        <button
-          onClick={() => setOverride(!open)}
-          aria-expanded={open}
-          className="flex w-full items-center gap-2 px-4 py-2.5 text-left"
-        >
-          <GraduationCap className="h-4 w-4 shrink-0 text-amber-300" />
-          <span className="text-xs font-semibold text-amber-200">{title}</span>
-          <span className="ml-2 hidden text-[10px] text-slate-500 sm:inline">{open ? 'tap to hide' : 'tap for simple steps'}</span>
-          <ChevronDown className={`ml-auto h-3.5 w-3.5 text-amber-300/70 transition-transform ${open ? 'rotate-180' : ''}`} />
-        </button>
-        {open && (
-          <div className="border-t border-amber-500/15 px-4 py-3">
-            <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
-              {steps.map((s, i) => (
-                <div key={s.title} className="flex gap-2 rounded-lg border border-violet-500/15 bg-[#141126]/80 p-2.5">
-                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-amber-500/20 font-mono text-[10px] font-bold text-amber-300">{i + 1}</span>
-                  <div>
-                    <div className="text-[11px] font-semibold text-slate-100">{s.title}</div>
-                    <div className="mt-0.5 text-[10px] leading-relaxed text-slate-400">{s.body}</div>
-                  </div>
+    <div className="glass overflow-hidden rounded-xl">
+      <button
+        onClick={() => setOverride(!open)}
+        aria-expanded={open}
+        className="flex w-full items-center gap-2 px-4 py-2.5 text-left"
+      >
+        <GraduationCap className="h-4 w-4 shrink-0 text-amber-300" />
+        <span className="text-xs font-semibold text-amber-200">{title}</span>
+        <span className="ml-2 hidden text-[10px] text-slate-500 sm:inline">{open ? 'tap to hide' : 'tap for simple steps'}</span>
+        <ChevronDown className={`ml-auto h-3.5 w-3.5 text-amber-300/70 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        <div className="border-t border-amber-400/10 px-4 py-3">
+          <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+            {steps.map((s, i) => (
+              <div key={s.title} className="flex gap-2 rounded-lg border border-white/8 bg-white/[0.03] p-2.5">
+                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-amber-400/15 font-mono text-[10px] font-bold text-amber-300">{i + 1}</span>
+                <div>
+                  <div className="text-[11px] font-semibold text-slate-100">{s.title}</div>
+                  <div className="mt-0.5 text-[10px] leading-relaxed text-slate-400">{s.body}</div>
                 </div>
-              ))}
-            </div>
-            {tip && (
-              <p className="mt-2.5 flex items-start gap-1.5 text-[10px] leading-relaxed text-amber-200/80">
-                <FlaskConical className="mt-0.5 h-3 w-3 shrink-0" /> {tip}
-              </p>
-            )}
+              </div>
+            ))}
           </div>
-        )}
-      </CardContent>
-    </Card>
+          {tip && (
+            <p className="mt-2.5 flex items-start gap-1.5 text-[10px] leading-relaxed text-amber-200/80">
+              <FlaskConical className="mt-0.5 h-3 w-3 shrink-0" /> {tip}
+            </p>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -214,8 +213,8 @@ export function ResultTabs({ results, how, meaning, initial = 'results' }: {
               onClick={() => setTab(t.key)}
               className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-medium transition-all ${
                 on
-                  ? 'border-violet-400/60 bg-violet-600/25 text-violet-100 shadow-[0_0_16px_rgba(139,92,246,0.2)]'
-                  : 'border-violet-500/20 bg-[#141126] text-slate-400 hover:border-violet-500/40 hover:text-slate-200'
+                  ? 'border-violet-400/50 bg-violet-500/20 text-violet-100 shadow-[0_0_18px_rgba(139,92,246,0.22)]'
+                  : 'border-white/10 bg-white/[0.03] text-slate-400 hover:border-violet-400/40 hover:text-slate-200'
               }`}
             >
               <Icon className={`h-3.5 w-3.5 ${on ? t.color : ''}`} />
@@ -227,7 +226,7 @@ export function ResultTabs({ results, how, meaning, initial = 'results' }: {
       <div role="tabpanel" className="flex flex-col gap-4">
         {tab === 'results' && results}
         {tab === 'how' && (
-          <div className="rounded-xl border border-cyan-500/20 bg-[#0d1420] p-5">
+          <div className="glass rounded-xl border-cyan-400/15 p-5">
             {how}
           </div>
         )}
@@ -263,10 +262,10 @@ export function StepList({ steps }: { steps: { title: string; body: React.ReactN
 /* ------------------------------------------------------------------ */
 
 const TONES = {
-  good: 'border-emerald-500/30 bg-emerald-500/5',
-  info: 'border-cyan-500/30 bg-cyan-500/5',
-  warn: 'border-amber-500/30 bg-amber-500/5',
-  violet: 'border-violet-500/30 bg-violet-500/5',
+  good: 'border-emerald-400/25 bg-emerald-400/[0.06]',
+  info: 'border-cyan-400/25 bg-cyan-400/[0.06]',
+  warn: 'border-amber-400/25 bg-amber-400/[0.06]',
+  violet: 'border-violet-400/25 bg-violet-400/[0.06]',
 } as const;
 
 export function MeaningCard({ title, tone = 'violet', children }: {
@@ -287,7 +286,7 @@ export function MeaningCard({ title, tone = 'violet', children }: {
 
 export function TryBox({ children }: { children: React.ReactNode }) {
   return (
-    <div className="rounded-lg border border-amber-500/30 bg-gradient-to-r from-[#1d1606] to-transparent p-4">
+    <div className="rounded-xl border border-amber-400/25 bg-gradient-to-r from-amber-500/[0.08] to-transparent p-4">
       <div className="mb-1 flex items-center gap-1.5 text-xs font-semibold text-amber-200">
         <FlaskConical className="h-3.5 w-3.5" /> Try this experiment
       </div>
@@ -303,7 +302,7 @@ export function TryBox({ children }: { children: React.ReactNode }) {
 export function MiniStat({ label, value, tone }: { label: string; value: string; tone?: 'good' | 'bad' | 'neutral' }) {
   const color = tone === 'good' ? 'text-emerald-300' : tone === 'bad' ? 'text-rose-300' : 'text-slate-100';
   return (
-    <span className="inline-flex flex-col rounded-md border border-violet-500/25 bg-[#181430] px-2.5 py-1.5">
+    <span className="inline-flex flex-col rounded-md border border-violet-400/25 bg-violet-500/10 px-2.5 py-1.5">
       <span className="text-[9px] uppercase tracking-wide text-slate-500">{label}</span>
       <span className={`font-mono text-sm font-semibold ${color}`}>{value}</span>
     </span>
