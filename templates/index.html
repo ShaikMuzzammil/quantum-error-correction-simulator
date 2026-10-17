@@ -22,9 +22,19 @@
   </div>
 </header>
 
+<!-- ============ TOP TAB BAR (Simulator | 3D Simulator Lab) ============ -->
+<nav class="top-tabs" role="tablist" aria-label="View mode">
+  <button type="button" class="top-tab active" id="tabSim" role="tab" aria-selected="true" aria-controls="simPane">
+    <span class="top-tab-dot"></span>Simulator
+  </button>
+  <button type="button" class="top-tab" id="tab3d" role="tab" aria-selected="false" aria-controls="pane3d">
+    <span class="top-tab-dot dot-3d"></span>3D Simulator Lab
+  </button>
+</nav>
+
 <main class="layout">
 
-  <!-- ====================== LEFT: CONFIGURATION ====================== -->
+  <!-- ====================== LEFT: CONFIGURATION (SHARED) ====================== -->
   <aside class="card config" id="configPanel" aria-labelledby="cfgTitle">
     <h2 id="cfgTitle">Experiment Configuration</h2>
 
@@ -102,6 +112,9 @@
 
   <!-- ====================== RIGHT COLUMN ====================== -->
   <div class="stack">
+
+    <!-- ============ SIMULATOR PANE (existing UI) ============ -->
+    <section id="simPane" class="pane" role="tabpanel" aria-labelledby="tabSim">
 
     <!-- Summary -->
     <section class="card" aria-labelledby="sumTitle">
@@ -250,6 +263,294 @@
         <li>Noise is applied only on the data qubits. Ancillas, syndrome extraction and recovery gates are noise-free, so this measures how well the code handles data errors, not full fault tolerance.</li>
       </ul>
     </section>
+    </section><!-- /simPane -->
+
+    <!-- ============ 3D SIMULATOR LAB PANE ============ -->
+    <section id="pane3d" class="pane" role="tabpanel" aria-labelledby="tab3d" hidden>
+
+      <!-- Sub-tab bar: A. Bloch Sphere | B. Error Propagation | C. Investigation Studio -->
+      <nav class="lab-tabs" role="tablist" aria-label="3D Lab view">
+        <button type="button" class="lab-tab active" id="labTabBloch" role="tab" aria-selected="true">
+          <span class="lab-tab-letter">A</span> 3D Bloch Sphere
+        </button>
+        <button type="button" class="lab-tab" id="labTabProp" role="tab" aria-selected="false">
+          <span class="lab-tab-letter">B</span> 3D Circuit &amp; Error Propagation
+        </button>
+        <button type="button" class="lab-tab" id="labTabInvest" role="tab" aria-selected="false">
+          <span class="lab-tab-letter">C</span> Investigation Studio
+        </button>
+      </nav>
+
+      <!-- ===== A. 3D BLOCH SPHERE WALKTHROUGH ===== -->
+      <section class="card lab-card" id="blochCard" aria-labelledby="blochTitle">
+        <div class="lab-grid">
+          <!-- Left: controls -->
+          <div class="lab-controls-card">
+            <h3 class="lab-section-title">Bloch Sphere — Pipeline Walkthrough</h3>
+            <p class="lab-section-desc">Inject one error and watch the live state arrow move through all 7 stages of the QEC pipeline on the Bloch sphere. Every stage is computed by the real Qiskit state-vector engine.</p>
+
+            <div class="lab-field">
+              <label>Inject error</label>
+              <select id="blochErrorType">
+                <option value="">Auto (from noise model)</option>
+                <option value="X">X (bit flip)</option>
+                <option value="Y">Y (both)</option>
+                <option value="Z">Z (phase flip)</option>
+              </select>
+            </div>
+
+            <div class="lab-btn-row">
+              <button type="button" class="btn btn-primary lab-btn" id="blochPlay">▶ Play</button>
+              <button type="button" class="btn btn-secondary lab-btn" id="blochReset">↺ Reset</button>
+            </div>
+
+            <div class="lab-info-box" id="blochStatus">Loading walkthrough…</div>
+
+            <div class="lab-stat-row">
+              <span class="lab-stat-label">Stage</span>
+              <span class="lab-stat-val" id="blochStageLabel">—</span>
+            </div>
+            <div class="lab-stat-row">
+              <span class="lab-stat-label">Fidelity</span>
+              <span class="lab-stat-val" id="blochFidelity">—</span>
+            </div>
+            <div class="lab-stat-row">
+              <span class="lab-stat-label">Correction</span>
+              <span class="lab-stat-val" id="blochCorrection">—</span>
+            </div>
+
+            <div class="lab-orbit-row">
+              <label class="lab-checkbox">
+                <input type="checkbox" id="blochOrbit" checked> Auto-orbit camera
+              </label>
+              <span class="lab-badge-3d">3D</span>
+            </div>
+            <p class="lab-hint">🖱 drag to orbit · scroll to zoom</p>
+
+            <div class="lab-export-row">
+              <button type="button" class="lab-export-btn" id="blochExportReport">📄 Report</button>
+              <button type="button" class="lab-export-btn" id="blochExportJSON">{} JSON</button>
+              <button type="button" class="lab-export-btn" id="blochExportCSV">📊 CSV</button>
+            </div>
+          </div>
+
+          <!-- Center: 3D canvas -->
+          <div class="lab-canvas-wrap">
+            <canvas class="lab-canvas" id="blochCanvas"></canvas>
+            <div class="lab-readout" id="blochVecReadout">|ψ⟩ → (0.00, 0.00, 1.00)</div>
+          </div>
+
+          <!-- Right: stage info -->
+          <div class="lab-side-card">
+            <h3 class="lab-section-title">Stage Description</h3>
+            <p class="lab-stage-desc" id="blochStageDesc">Press Play to start the pipeline walkthrough.</p>
+
+            <h3 class="lab-section-title">Bloch Vector Trajectory</h3>
+            <div class="bloch-trajectory-table" id="blochTrajectoryTable">
+              <div class="bloch-traj-row"><span class="bloch-traj-num">—</span><span class="bloch-traj-name">—</span><span class="bloch-traj-vec">—</span></div>
+            </div>
+
+            <h3 class="lab-section-title">Syndrome Bits</h3>
+            <div class="lab-syndrome" id="blochSyndrome">
+              <div class="lab-syn-row"><span>—</span><span>—</span></div>
+            </div>
+
+            <h3 class="lab-section-title">Pipeline Stages</h3>
+            <div class="stage-pills" id="blochStagePills"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== B. 3D CIRCUIT & ERROR PROPAGATION ===== -->
+      <section class="card lab-card" id="propCard" aria-labelledby="propTitle" hidden>
+        <div class="lab-grid">
+          <!-- Left: controls -->
+          <div class="lab-controls-card">
+            <h3 class="lab-section-title">3D Circuit & Error Propagation</h3>
+            <p class="lab-section-desc">Inject an error and watch it split and morph through the real encoding circuit — the physics reason error correction needs distance and repeated rounds.</p>
+
+            <div class="lab-field">
+              <label>Inject error</label>
+              <select id="propErrorType">
+                <option value="">Auto (from noise model)</option>
+                <option value="X">X (bit flip)</option>
+                <option value="Y">Y (both)</option>
+                <option value="Z">Z (phase flip)</option>
+              </select>
+            </div>
+
+            <div class="lab-field">
+              <label>Speed</label>
+              <select id="propSpeed">
+                <option value="600">Slow</option>
+                <option value="350" selected>Normal</option>
+                <option value="180">Fast</option>
+              </select>
+            </div>
+
+            <div class="lab-btn-row">
+              <button type="button" class="btn btn-primary lab-btn" id="propPlay">▶ Play</button>
+              <button type="button" class="btn btn-secondary lab-btn" id="propStep">› Step</button>
+              <button type="button" class="btn btn-secondary lab-btn" id="propReset">↺ Reset</button>
+            </div>
+
+            <div class="lab-info-box" id="propStatus">Loading circuit…</div>
+
+            <div class="lab-chips" id="propChips"></div>
+
+            <div class="lab-orbit-row">
+              <label class="lab-checkbox">
+                <input type="checkbox" id="propOrbit" checked> Auto-orbit camera
+              </label>
+              <span class="lab-badge-3d">3D</span>
+            </div>
+            <p class="lab-hint">🖱 drag to orbit · scroll to zoom</p>
+
+            <h3 class="lab-section-title" style="margin-top:16px">Legend</h3>
+            <ul class="lab-legend">
+              <li><span class="lab-dot lab-x"></span> X (bit flip)</li>
+              <li><span class="lab-dot lab-z"></span> Z (phase flip)</li>
+              <li><span class="lab-dot lab-y"></span> Y (both)</li>
+            </ul>
+
+            <div class="lab-export-row">
+              <button type="button" class="lab-export-btn" id="propExportReport">📄 Report</button>
+              <button type="button" class="lab-export-btn" id="propExportJSON">{} JSON</button>
+              <button type="button" class="lab-export-btn" id="propExportCSV">📊 CSV</button>
+              <button type="button" class="lab-export-btn" id="propExportCircuit">⟐ Circuit</button>
+            </div>
+          </div>
+
+          <!-- Center: 3D canvas -->
+          <div class="lab-canvas-wrap">
+            <canvas class="lab-canvas" id="propCanvas"></canvas>
+          </div>
+
+          <!-- Right: frame info -->
+          <div class="lab-side-card">
+            <h3 class="lab-section-title">Frame</h3>
+            <div class="lab-frame-info" id="propFrameInfo">Press Play to inject a Pauli error and watch it propagate through the gates.</div>
+
+            <h3 class="lab-section-title">Syndrome</h3>
+            <div class="lab-syndrome" id="propSyndrome">
+              <div class="lab-syn-row"><span>—</span><span>—</span></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== C. QUANTUM ERROR INVESTIGATION STUDIO ===== -->
+      <section class="card lab-card" id="investCard" aria-labelledby="investTitle" hidden>
+        <div class="invest-grid">
+          <!-- Controls bar -->
+          <div class="invest-controls-bar">
+            <h3 class="lab-section-title">Quantum Error Investigation Studio</h3>
+            <p class="lab-section-desc">Create an experiment, observe a hidden error, investigate the syndrome evidence, choose a correction, and replay to see what changed. Driven by the real Qiskit backend.</p>
+
+            <div class="lab-field">
+              <label>Investigation mode</label>
+              <select id="investMode">
+                <option value="guided">Guided — show the error and explain it</option>
+                <option value="challenge">Challenge — hide the injected error</option>
+                <option value="free">Free investigation — choose and compare recoveries</option>
+              </select>
+            </div>
+
+            <div class="lab-field">
+              <label>Fault to inject (hidden in challenge mode)</label>
+              <select id="investFaultType">
+                <option value="">Auto (random)</option>
+                <option value="X">X — bit flip</option>
+                <option value="Z">Z — phase flip</option>
+                <option value="Y">Y — combined Pauli error</option>
+              </select>
+            </div>
+
+            <div class="invest-btn-row">
+              <button type="button" class="btn btn-primary" id="investStartBtn">🔬 Start Investigation</button>
+            </div>
+
+            <div class="lab-info-box" id="investStatus">Ready — press Start Investigation</div>
+            <div class="lab-info-box" id="investFaultReveal" style="color:#8f9bc7">Fault: not started</div>
+
+            <div class="invest-stats-row">
+              <span class="invest-stat"><span class="invest-stat-label">Attempts</span><span class="invest-stat-val" id="investAttempts">0</span></span>
+              <span class="invest-stat"><span class="invest-stat-label">Score</span><span class="invest-stat-val" id="investScore">0</span></span>
+            </div>
+
+            <div class="lab-export-row">
+              <button type="button" class="lab-export-btn" id="investExportReport">📄 Report</button>
+            </div>
+          </div>
+
+          <!-- Main visualization area -->
+          <div class="invest-main">
+            <!-- Quantum Processor Chamber -->
+            <div class="invest-section">
+              <div class="invest-section-head">
+                <span class="invest-step-label" id="investStepLabel">— Step not started</span>
+              </div>
+              <canvas id="investProcessorCanvas" class="invest-canvas"></canvas>
+            </div>
+
+            <!-- Circuit Time Machine -->
+            <div class="invest-section">
+              <div class="invest-section-head">
+                <h4>Circuit Time Machine</h4>
+                <div class="invest-playback">
+                  <button type="button" class="lab-export-btn" id="investRestartBtn">↺</button>
+                  <button type="button" class="lab-export-btn" id="investPrevBtn">‹</button>
+                  <button type="button" class="btn btn-primary lab-btn" id="investPlayBtn">▶ Play</button>
+                  <button type="button" class="lab-export-btn" id="investNextBtn">›</button>
+                  <select id="investSpeed" class="invest-speed-select">
+                    <option value="2000">Slow</option>
+                    <option value="1200" selected>Normal</option>
+                    <option value="600">Fast</option>
+                  </select>
+                </div>
+              </div>
+              <div class="invest-timeline" id="investTimeline">
+                <div class="invest-tl-placeholder">Start an investigation to see the event timeline</div>
+              </div>
+            </div>
+
+            <!-- Investigation Console -->
+            <div class="invest-section">
+              <h4>Investigation Console</h4>
+              <div class="invest-console" id="investConsole">
+                <div class="invest-console-placeholder">Event log will appear here after starting an investigation</div>
+              </div>
+            </div>
+
+            <!-- Step description -->
+            <div class="invest-section">
+              <h4>Step Description</h4>
+              <p class="invest-step-desc" id="investStepDesc">Press Start Investigation to begin.</p>
+            </div>
+          </div>
+
+          <!-- Right column: Syndrome + Recovery -->
+          <div class="invest-side">
+            <!-- Syndrome Panel -->
+            <div class="invest-section">
+              <h4>Syndrome Evidence</h4>
+              <div class="invest-syndrome-panel" id="investSyndromePanel">
+                <div class="invest-syn-placeholder">Syndrome bits will appear here</div>
+              </div>
+            </div>
+
+            <!-- Recovery Panel -->
+            <div class="invest-section">
+              <h4>Recovery Decision</h4>
+              <div class="invest-recovery-panel" id="investRecoveryPanel">
+                <div class="invest-recovery-placeholder">Start an investigation, then choose a correction</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </section><!-- /pane3d -->
+
   </div>
 </main>
 
@@ -262,7 +563,12 @@
   <div class="circuit-box circuit-box-large"><pre class="circuit-pre" id="circuitPreLarge"></pre></div>
 </dialog>
 
+<!-- Custom Canvas-2D 3D engine (zero dependencies) -->
+<script src="{{ url_for('static', filename='js/3d_engine.js') }}"></script>
+
 <script src="{{ url_for('static', filename='js/chart.umd.js') }}"></script>
 <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+<script src="{{ url_for('static', filename='js/3d_lab.js') }}"></script>
+<script src="{{ url_for('static', filename='js/investigation_studio.js') }}"></script>
 </body>
 </html>

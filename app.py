@@ -12,6 +12,7 @@ import qiskit_aer
 from flask import Flask, jsonify, render_template, request, send_from_directory
 
 import qec_simulator as sim
+import qec_3d as viz
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024  # PNG uploads
@@ -215,6 +216,222 @@ def api_download(filename):
     if not (filename.endswith(".csv") or filename.endswith(".png")):
         return jsonify({"ok": False, "errors": ["Unsupported file type."]}), 400
     return send_from_directory(sim.OUTPUT_DIR, filename, as_attachment=True)
+
+
+# ---------------------------------------------------------------------------
+# 3D Simulator Lab endpoints
+# ---------------------------------------------------------------------------
+
+def parse_3d_config(data):
+    """Validate a request body for the 3D endpoints. Returns a clean dict."""
+    data = data or {}
+    code = data.get("code", "bit_flip")
+    if code not in sim.CODE_INFO:
+        code = "bit_flip"
+    try:
+        input_bit = int(data.get("input_bit", 0))
+        if input_bit not in (0, 1):
+            input_bit = 0
+    except (TypeError, ValueError):
+        input_bit = 0
+    noise = data.get("noise", "bit_flip")
+    if noise not in sim.NOISE_INFO:
+        noise = "bit_flip"
+    try:
+        probability = float(data.get("probability_percent", 0)) / 100.0
+        probability = max(0.0, min(1.0, probability))
+    except (TypeError, ValueError):
+        probability = 0.0
+    scope = data.get("noise_scope", "selected")
+    if scope not in ("selected", "all"):
+        scope = "selected"
+    basis = data.get("basis", "auto")
+    if basis not in ("auto", "Z", "X"):
+        basis = "auto"
+    n = sim.CODE_INFO[code]["data_qubits"]
+    try:
+        error_qubit = int(data.get("error_qubit", 0))
+        if not 0 <= error_qubit < n:
+            error_qubit = 0
+    except (TypeError, ValueError):
+        error_qubit = 0
+    n_total = sim.CODE_INFO[code]["total_qubits"]
+    try:
+        qubit_index = int(data.get("qubit_index", 0))
+        if not 0 <= qubit_index < n_total:
+            qubit_index = 0
+    except (TypeError, ValueError):
+        qubit_index = 0
+    stage = data.get("stage", "final")
+    if stage not in ("prep", "encode", "noise", "syndrome", "correct", "decode", "final"):
+        stage = "final"
+    error_type = data.get("error_type")
+    if error_type not in ("X", "Y", "Z", None):
+        error_type = None
+    return dict(
+        code=code, input_bit=input_bit, noise=noise, probability=probability,
+        noise_scope=scope, basis=basis, error_qubit=error_qubit,
+        qubit_index=qubit_index, stage=stage, error_type=error_type,
+    )
+
+
+@app.route("/api/3d/bloch", methods=["POST"])
+def api_3d_bloch():
+    """Bloch vector of a single qubit at a chosen stage of the pipeline."""
+    try:
+        cfg = parse_3d_config(request.get_json(silent=True))
+        result = viz.get_bloch_state(
+            cfg["code"], cfg["input_bit"], cfg["error_qubit"],
+            cfg["noise_scope"], cfg["basis"], cfg["qubit_index"],
+            cfg["stage"], cfg["error_type"], cfg["probability"],
+        )
+        result["ok"] = True
+        result["stage_info"] = viz.STAGE_INFO.get(cfg["stage"], "")
+        return jsonify(result)
+    except Exception as e:
+        return server_error(e)
+
+
+@app.route("/api/3d/circuit", methods=["POST"])
+def api_3d_circuit():
+    """3D layout of the QEC circuit for the current selection."""
+    try:
+        cfg = parse_3d_config(request.get_json(silent=True))
+        result = viz.get_circuit_3d(
+            cfg["code"], cfg["input_bit"], cfg["error_qubit"],
+            cfg["noise_scope"], cfg["basis"],
+        )
+        result["ok"] = True
+        return jsonify(result)
+    except Exception as e:
+        return server_error(e)
+
+
+@app.route("/api/3d/propagate", methods=["POST"])
+def api_3d_propagate():
+    """Frame-by-frame error propagation through the QEC circuit."""
+    try:
+        cfg = parse_3d_config(request.get_json(silent=True))
+        # If error_type is not given, pick it from the noise model
+        error_type = cfg["error_type"]
+        if error_type is None:
+            error_type = {"bit_flip": "X", "phase_flip": "Z", "depolarizing": "X"}.get(cfg["noise"], "X")
+        result = viz.propagate_error(
+            cfg["code"], cfg["input_bit"], cfg["error_qubit"],
+            error_type, cfg["noise_scope"], cfg["basis"],
+        )
+        result["ok"] = True
+        return jsonify(result)
+    except Exception as e:
+        return server_error(e)
+
+
+@app.route("/api/3d/walkthrough", methods=["POST"])
+def api_3d_walkthrough():
+    """7-stage Bloch-sphere walkthrough: input → encode → noise → syndrome →
+    correct → decode → measure. Each stage has a Bloch vector + description +
+    syndrome bits + correction info. Drives the live arrow animation."""
+    try:
+        cfg = parse_3d_config(request.get_json(silent=True))
+        error_type = cfg["error_type"]
+        if error_type is None:
+            error_type = {"bit_flip": "X", "phase_flip": "Z", "depolarizing": "X"}.get(cfg["noise"], "X")
+        result = viz.get_bloch_walkthrough(
+            cfg["code"], cfg["input_bit"], cfg["error_qubit"],
+            error_type, cfg["noise_scope"], cfg["basis"],
+        )
+        result["ok"] = True
+        return jsonify(result)
+    except Exception as e:
+        return server_error(e)
+
+
+# ---------------------------------------------------------------------------
+# Quantum Error Investigation Studio endpoints
+# ---------------------------------------------------------------------------
+
+@app.route("/api/3d/investigate", methods=["POST"])
+def api_3d_investigate():
+    """Start a new investigation experiment. Generates a hidden fault,
+    runs the real Qiskit circuit, and returns the evidence (syndrome,
+    timeline, processor layout). In challenge mode, the fault is hidden."""
+    try:
+        data = request.get_json(silent=True) or {}
+        code = data.get("code", "bit_flip")
+        if code not in sim.CODE_INFO:
+            code = "bit_flip"
+        try:
+            input_bit = int(data.get("input_bit", 0))
+            if input_bit not in (0, 1):
+                input_bit = 0
+        except (TypeError, ValueError):
+            input_bit = 0
+        noise_scope = data.get("noise_scope", "selected")
+        if noise_scope not in ("selected", "all"):
+            noise_scope = "selected"
+        basis = data.get("basis", "auto")
+        if basis not in ("auto", "Z", "X"):
+            basis = "auto"
+        error_type = data.get("error_type")
+        if error_type not in ("X", "Y", "Z", None):
+            error_type = None
+        n = sim.CODE_INFO[code]["data_qubits"]
+        try:
+            error_qubit = int(data.get("error_qubit", 0))
+            if not 0 <= error_qubit < n:
+                error_qubit = 0
+        except (TypeError, ValueError):
+            error_qubit = 0
+        mode = data.get("mode", "guided")
+        if mode not in ("guided", "challenge", "free"):
+            mode = "guided"
+        seed = data.get("seed")
+        if seed is not None:
+            try:
+                seed = int(seed)
+            except (TypeError, ValueError):
+                seed = None
+
+        result = viz.create_investigation(
+            code, input_bit, noise_scope, basis, error_type, error_qubit,
+            mode, seed
+        )
+        result["ok"] = True
+        # In challenge mode, strip the private answer from the response
+        if mode == "challenge":
+            result.pop("_private", None)
+        return jsonify(result)
+    except Exception as e:
+        return server_error(e)
+
+
+@app.route("/api/3d/recover", methods=["POST"])
+def api_3d_recover():
+    """Submit the user's chosen recovery and validate against the ground truth.
+    Reveals the hidden fault and the correct recovery."""
+    try:
+        data = request.get_json(silent=True) or {}
+        experiment_id = data.get("experiment_id", "")
+        code = data.get("code", "bit_flip")
+        input_bit = int(data.get("input_bit", 0))
+        error_qubit = int(data.get("error_qubit", 0))
+        error_type = data.get("error_type", "X")
+        noise_scope = data.get("noise_scope", "selected")
+        basis = data.get("basis", "auto")
+        seed = data.get("seed")
+        if seed is not None:
+            seed = int(seed)
+        user_x = [int(q) for q in data.get("user_correction_x", [])]
+        user_z = [int(q) for q in data.get("user_correction_z", [])]
+
+        result = viz.submit_recovery(
+            experiment_id, code, input_bit, error_qubit, error_type,
+            noise_scope, basis, user_x, user_z, seed
+        )
+        result["ok"] = True
+        return jsonify(result)
+    except Exception as e:
+        return server_error(e)
 
 
 if __name__ == "__main__":
